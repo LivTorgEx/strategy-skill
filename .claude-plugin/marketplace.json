@@ -1,0 +1,32 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "livtorgex-strategy-skill",
+  "description": "LivTorgEx strategy builder skills for Claude Code",
+  "owner": {
+    "name": "LivTorgEx"
+  },
+  "plugins": [
+    {
+      "name": "livtorgex-strategy-skill",
+      "source": "./",
+      "description": "Design and deploy LivTorgEx trading bot group strategies — indicators, conditions, event handlers",
+      "version": "1.0.0",
+      "author": {
+        "name": "LivTorgEx"
+      },
+      "homepage": "https://github.com/LivTorgEx/strategy-skill",
+      "license": "MIT",
+      "keywords": [
+        "claude-code",
+        "claude-skills",
+        "livtorgex",
+        "trading",
+        "strategy",
+        "bot",
+        "indicators"
+      ],
+      "category": "finance",
+      "strict": false
+    }
+  ]
+}

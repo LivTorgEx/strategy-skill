@@ -1,0 +1,16 @@
+{
+  "name": "livtorgex-strategy-skill",
+  "version": "1.0.0",
+  "skills": [
+    "./skills/"
+  ],
+  "keywords": [
+    "claude-code",
+    "claude-skills",
+    "livtorgex",
+    "trading",
+    "strategy",
+    "bot",
+    "indicators"
+  ]
+}
