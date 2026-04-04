@@ -20,7 +20,16 @@ description: LivTorgEx condition, value, and action syntax reference. Use when b
 { "type": "IsEmpty", "value": { /* value */ } }
 ```
 
-`<A` / `>A` = absolute-value comparison.
+### `<A` / `>A` — direction-aware auto-reversing comparisons
+
+These operations flip their meaning based on `global.direction`:
+
+| Operation | When LONG | When SHORT |
+|-----------|-----------|------------|
+| `>A`      | `>`       | `<`        |
+| `<A`      | `<`       | `>`        |
+
+Use `<A`/`>A` when the same condition should work for both long and short entries without duplicating logic. For example, "price has crossed above the target" can be written as one condition with `>A` — for a long it checks `price > target`, for a short it checks `price < target`.
 
 **Root-level `filters` arrays are AND by default** — every item must pass. Use multiple items instead of `Expression: And`. Only use `Expression` when you need OR logic or nesting.
 
@@ -144,3 +153,38 @@ description: LivTorgEx condition, value, and action syntax reference. Use when b
              "value": "Exist" },
   "right": { "type": "Number", "value": 0.0 } }
 ```
+
+### Safe limit order placement — only place when price has crossed the target
+
+A limit order placed at or beyond the current price fills immediately as a market order. To avoid this, guard the `CreateOrder` action with a `>A` check: only place the limit buy when price is **already above** the target (so the order sits below current price). For a short the same condition auto-reverses via `>A`.
+
+```json
+{
+  "type": "Action",
+  "filters": [
+    { "type": "Operation", "operation": "==",
+      "left":  { "type": "Order",
+                 "mark":  { "type": "String", "value": "Open" },
+                 "pside": { "type": "Global", "value": "Direction" },
+                 "value": "Exist" },
+      "right": { "type": "Number", "value": 0.0 } },
+    { "type": "Operation", "operation": ">A",
+      "left":  { "type": "Global", "value": "Price" },
+      "right": { "type": "Variable", "name": "limit_price" } }
+  ],
+  "action": {
+    "type": "CreateOrder",
+    "amount": { "type": "Percentage", "source": "MaxAmount", "value": 100.0 },
+    "side":   { "type": "Global", "value": "Direction" },
+    "price":  { "type": "Variable", "name": "limit_price" },
+    "order_type": "LIMIT",
+    "pside":  { "type": "Global", "value": "Direction" },
+    "mark":   { "type": "String", "value": "Open" },
+    "msg": "Limit entry after price crossed"
+  }
+}
+```
+
+**Why `>A`:**
+- LONG: places the limit order only when `price > limit_price` — order is below current price, will not fill immediately.
+- SHORT: auto-reverses to `price < limit_price` — order is above current price, same guarantee.
