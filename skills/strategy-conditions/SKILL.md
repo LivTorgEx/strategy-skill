@@ -60,6 +60,31 @@ Use `<A`/`>A` when the same condition should work for both long and short entrie
   "mark":  { "type": "String", "value": "Open" },
   "pside": { "type": "Position", "value": "Direction" },
   "value": "Exist" }
+
+// Percentage distance between two prices: (right - left) / left * 100
+// Use is_abs: true for unsigned distance
+{ "type": "PriceMeasure",
+  "left":  { /* value — base price */ },
+  "right": { /* value — target price */ },
+  "is_abs": false }
+
+// Arithmetic on any two values: +, -, *, /
+{ "type": "Math",
+  "value": {
+    "type": "Operation",
+    "operation": "+" | "-" | "*" | "/",
+    "left":  { /* value */ },
+    "right": { /* value */ }
+  }
+}
+
+// Where a value is between two bounds, normalised 0.0–1.0:
+// result = (value - left) / (right - left). Use is_abs: true for unsigned result.
+{ "type": "PercentageBetween",
+  "left":  { /* value — lower bound */ },
+  "right": { /* value — upper bound */ },
+  "value": { /* value — the probe */ },
+  "is_abs": false }
 ```
 
 **Note:** `Direction` values are always uppercase: `"LONG"`, `"SHORT"`, `"BOTH"`.
@@ -188,3 +213,62 @@ A limit order placed at or beyond the current price fills immediately as a marke
 **Why `>A`:**
 - LONG: places the limit order only when `price > limit_price` — order is below current price, will not fill immediately.
 - SHORT: auto-reverses to `price < limit_price` — order is above current price, same guarantee.
+
+### MRC-based TP/SL using PriceMeasure
+
+Compute the TP % distance between two MRC bands and store half as the SL %. Use `on_indicators` to update the variable on every candle close, **before** the entry action.
+
+```json
+// variables declaration
+"variables": [
+  { "type": "Variable", "name": "SL %", "key": "sl_pct", "default": { "type": "Number", "value": -1.0 } }
+],
+
+// on_indicators action 1 — compute SL % = PriceMeasure(DownInner → UpBig) / -2
+// PriceMeasure(DownInner, UpBig) gives a positive %; dividing by -2 makes it negative for SL
+{
+  "type": "Action",
+  "filters": [],
+  "action": {
+    "type": "SetVariable",
+    "name": "sl_pct",
+    "value": {
+      "type": "Math",
+      "value": {
+        "type": "Operation",
+        "operation": "/",
+        "left": {
+          "type": "PriceMeasure",
+          "left":  { "type": "Indicator", "token": "Chart", "timeframe": 60, "idx": 0,
+                     "indicator": { "type": "Mrc", "period": "200", "property": "DownInner" } },
+          "right": { "type": "Indicator", "token": "Chart", "timeframe": 60, "idx": 0,
+                     "indicator": { "type": "Mrc", "period": "200", "property": "UpBig" } },
+          "is_abs": false
+        },
+        "right": { "type": "Number", "value": -2.0 }
+      }
+    }
+  }
+},
+
+// take_profit — target UpBig price at entry snapshot
+"take_profit": { "type": "NextOrder", "order": {
+  "order_type": "MARKET",
+  "price": {
+    "type": "Indicator",
+    "source": { "type": "Indicator", "token": "Chart", "timeframe": 60, "idx": 0,
+                "indicator": { "type": "Mrc", "period": "200", "property": "UpBig" } },
+    "price": { "type": "Percentage", "value": 0.0 }
+  },
+  "amount": { "type": "Percentage", "source": "FirstOrder", "value": 100.0 }
+}},
+
+// stop_loss — entry price offset by sl_pct variable (negative %)
+"stop_loss": { "type": "NextOrder", "only_great": false, "activates": [], "filters": [],
+  "order": {
+    "order_type": "MARKET",
+    "price": { "type": "FirstPrice", "price": { "type": "PercentageVariable", "name": "sl_pct" } },
+    "amount": { "type": "Percentage", "source": "FirstOrder", "value": 100.0 }
+  }
+}
+```
