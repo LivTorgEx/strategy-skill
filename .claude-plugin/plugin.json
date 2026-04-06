@@ -2,7 +2,9 @@
   "name": "livtorgex-strategy-skill",
   "version": "1.0.0",
   "skills": [
-    "./skills/"
+    "./skills/",
+    "./skills/analysis",
+    "./skills/strategy-values"
   ],
   "keywords": [
     "claude-code",
