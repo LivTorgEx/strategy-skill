@@ -211,7 +211,29 @@ Each item: `{ "name": "...", "params": [...], "actions": [...] }`
 
 - `name` — display label only
 - `key` — used everywhere to reference this variable (in SetVariable, ClearVariable, Variable value)
-- `default` — initial value (optional)
+- `default` — initial value (optional). Accepts **any `TradeSettingProValue` expression** — not just `Number`. For example, use a `Math`/`PriceMeasure` expression to pre-compute a value from indicator bands at spawn time:
+
+```json
+{
+  "type": "Variable", "name": "SL %", "key": "sl_pct",
+  "default": {
+    "type": "Math",
+    "value": {
+      "type": "Operation", "operation": "/",
+      "left": {
+        "type": "PriceMeasure", "is_abs": false,
+        "left":  { "type": "Indicator", "token": "Chart", "timeframe": 60, "idx": 0,
+                   "indicator": { "type": "Mrc", "period": "200", "property": "DownInner" } },
+        "right": { "type": "Indicator", "token": "Chart", "timeframe": 60, "idx": 0,
+                   "indicator": { "type": "Mrc", "period": "200", "property": "UpBig" } }
+      },
+      "right": { "type": "Number", "value": -2.0 }
+    }
+  }
+}
+```
+
+This is evaluated at **bot spawn time** (before the first candle close). Combine with `on_indicators` `SetVariable` to refresh it on every candle.
 
 Read a variable in a filter:
 ```json
