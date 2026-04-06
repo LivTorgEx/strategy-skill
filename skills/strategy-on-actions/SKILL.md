@@ -54,7 +54,9 @@ Understanding when each handler fires requires understanding the bot lifecycle:
    - `Force` — opens a position at market price right away. No `ForceStartPosition` action needed.
    - `Wait` — bot starts in waiting state. **You must call `ForceStartPosition` from `on_analysis` or `on_indicators`** to enter. Use `ForceStopBot` to exit if conditions expire without entering.
 4. Once the bot has an open position, `on_analysis` / `on_indicators` run continuously to manage it.
-5. When the position closes, **`on_finished`** fires once, then the bot exits.
+5. When the position closes, **`on_finished`** fires once:
+   - If `on_finished` is **empty** → bot stops automatically.
+   - If `on_finished` has **any actions** → bot enters **waiting mode** and stays alive. Add `ForceStopBot` explicitly to stop it.
 
 **Decision rule:**
 - Use `enter_price: Force` when spawn conditions in `professional.filters` are sufficient to enter immediately — e.g. fresh MRC cross + NTPS > 50.
@@ -127,9 +129,29 @@ Each item: `{ "timeframe": int, "filters": [...], "actions": [...] }`
 
 ## `on_finished` — fires when a position closes
 
-Use to revert direction and re-enter on the opposite side after a close.
+**Critical behaviour: `on_finished` actions put the bot into waiting mode.**
+
+- **`on_finished` is empty** → bot stops automatically after position closes.
+- **`on_finished` has any actions** → bot transitions to **waiting mode** after position closes and stays alive. It will NOT stop on its own.
+  - Add `ForceStopBot` as the last action if you want the bot to stop after running `on_finished`.
+  - Omit `ForceStopBot` if you want the bot to stay alive and re-enter (e.g. grid, revert strategies).
 
 ```json
+// Pattern A — run cleanup then stop bot
+"on_finished": [
+  {
+    "type": "Action",
+    "filters": [],
+    "action": { "type": "SetVariable", "name": "last_side", "value": { "type": "Position", "value": "Direction" } }
+  },
+  {
+    "type": "Action",
+    "filters": [],
+    "action": { "type": "ForceStopBot", "msg": "Cleanup done, stopping" }
+  }
+]
+
+// Pattern B — revert direction and re-enter (bot stays alive in waiting, immediately re-enters)
 "on_finished": [
   {
     "type": "Action",
