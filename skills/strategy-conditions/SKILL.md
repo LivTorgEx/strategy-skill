@@ -214,61 +214,92 @@ A limit order placed at or beyond the current price fills immediately as a marke
 - LONG: places the limit order only when `price > limit_price` — order is below current price, will not fill immediately.
 - SHORT: auto-reverses to `price < limit_price` — order is above current price, same guarantee.
 
-### MRC-based TP/SL using PriceMeasure
+### TP/SL order price base types
 
-Compute the TP % distance between two MRC bands and store half as the SL %. Use `on_indicators` to update the variable on every candle close, **before** the entry action.
+The `price` field in a TP/SL order wraps a **base price** + a **price condition** (% offset):
+
+| `type` | Base price used |
+|--------|----------------|
+| `FirstPrice` | Price of the first order placed in this position |
+| `Position` | Average entry price of the position (**preferred** — correct when position has multiple entries) |
+| `LastOrder` | Price of the most recent order |
+| `Indicator` | Value of an indicator at order creation time (`source` + `price` offset) |
+| `Variable` | Value of a named variable |
+
+The price condition (`price` sub-field) is one of:
+
+| `type` | Description |
+|--------|-------------|
+| `Percentage` | Fixed % offset — `{ "type": "Percentage", "value": -1.5 }` |
+| `PercentageVariable` | Read % from a named variable — `{ "type": "PercentageVariable", "name": "sl_pct" }` |
+
+### Dynamic TP/SL using variables + sequential defaults
+
+When TP/SL percentages are computed from indicator values rather than hardcoded, use variables with `PercentageVariable`. Variables initialise sequentially at spawn time — each can reference previously defined ones (see `strategy-on-actions` skill for full variable rules).
+
+**Pattern: compute a range %, then derive TP % and SL % from it**
 
 ```json
-// variables declaration
 "variables": [
-  { "type": "Variable", "name": "SL %", "key": "sl_pct", "default": { "type": "Number", "value": -1.0 } }
-],
-
-// on_indicators action 1 — compute SL % = PriceMeasure(DownInner → UpBig) / -2
-// PriceMeasure(DownInner, UpBig) gives a positive %; dividing by -2 makes it negative for SL
-{
-  "type": "Action",
-  "filters": [],
-  "action": {
-    "type": "SetVariable",
-    "name": "sl_pct",
-    "value": {
+  {
+    "type": "Variable", "name": "Range %", "key": "range_pct",
+    "default": { /* any value expression — e.g. PriceMeasure between two indicator levels */ }
+  },
+  {
+    "type": "Variable", "name": "SL %", "key": "sl_pct",
+    "default": {
       "type": "Math",
       "value": {
-        "type": "Operation",
-        "operation": "/",
-        "left": {
-          "type": "PriceMeasure",
-          "left":  { "type": "Indicator", "token": "Chart", "timeframe": 60, "idx": 0,
-                     "indicator": { "type": "Mrc", "period": "200", "property": "DownInner" } },
-          "right": { "type": "Indicator", "token": "Chart", "timeframe": 60, "idx": 0,
-                     "indicator": { "type": "Mrc", "period": "200", "property": "UpBig" } },
-          "is_abs": false
-        },
+        "type": "Operation", "operation": "/",
+        "left":  { "type": "Variable", "name": "range_pct" },
         "right": { "type": "Number", "value": -2.0 }
       }
     }
+  },
+  {
+    "type": "Variable", "name": "TP %", "key": "tp_pct",
+    "default": { "type": "Variable", "name": "range_pct" }
   }
-},
+],
 
-// take_profit — target UpBig price at entry snapshot
+// on_indicators — refresh variables on every candle close (maintain same order)
+"on_indicators": [{ "timeframe": 60, "filters": [], "actions": [
+  { "type": "Action", "filters": [],
+    "action": { "type": "SetVariable", "name": "range_pct", "value": { /* same expression as default */ } }
+  },
+  { "type": "Action", "filters": [],
+    "action": { "type": "SetVariable", "name": "sl_pct",
+      "value": { "type": "Math", "value": { "type": "Operation", "operation": "/",
+        "left": { "type": "Variable", "name": "range_pct" },
+        "right": { "type": "Number", "value": -2.0 } } }
+    }
+  },
+  { "type": "Action", "filters": [],
+    "action": { "type": "SetVariable", "name": "tp_pct",
+      "value": { "type": "Variable", "name": "range_pct" }
+    }
+  }
+]}],
+
+// take_profit — Position average entry + tp_pct %
 "take_profit": { "type": "NextOrder", "order": {
   "order_type": "MARKET",
-  "price": {
-    "type": "Indicator",
-    "source": { "type": "Indicator", "token": "Chart", "timeframe": 60, "idx": 0,
-                "indicator": { "type": "Mrc", "period": "200", "property": "UpBig" } },
-    "price": { "type": "Percentage", "value": 0.0 }
-  },
+  "price": { "type": "Position", "price": { "type": "PercentageVariable", "name": "tp_pct" } },
   "amount": { "type": "Percentage", "source": "FirstOrder", "value": 100.0 }
 }},
 
-// stop_loss — entry price offset by sl_pct variable (negative %)
+// stop_loss — Position average entry + sl_pct % (negative value = below entry)
 "stop_loss": { "type": "NextOrder", "only_great": false, "activates": [], "filters": [],
   "order": {
     "order_type": "MARKET",
-    "price": { "type": "FirstPrice", "price": { "type": "PercentageVariable", "name": "sl_pct" } },
+    "price": { "type": "Position", "price": { "type": "PercentageVariable", "name": "sl_pct" } },
     "amount": { "type": "Percentage", "source": "FirstOrder", "value": 100.0 }
   }
 }
 ```
+
+> **`Position` vs `FirstPrice`:**
+> - Use `Position` when TP/SL should track the **average entry price** (correct for DCA / multi-entry strategies)
+> - Use `FirstPrice` when TP/SL should be anchored to the **initial entry price** — useful when you want to guarantee profit/loss relative to the first order regardless of subsequent DCA fills
+>
+> **Default preference: always use `Position` unless the user explicitly asks for first-price anchoring.**
