@@ -120,7 +120,7 @@ Reads a computed indicator value for the current symbol.
 |-------|----------|---------|-------------|
 | `token` | no | `"Chart"` | Symbol token. Use `"Chart"` for the bot's own symbol |
 | `timeframe` | yes | — | Candle timeframe in seconds (60, 300, 900, 1800, 3600, 14400) |
-| `idx` | no | `0` | Candle index: 0 = current/latest, 1 = previous, etc. |
+| `idx` | no | `0` | Candle index: **0 = last closed candle**, 1 = one before, 2 = two before, etc. |
 | `indicator` | yes | — | Indicator definition (see `strategy-indicators` skill) |
 
 Returns: Float or Direction depending on the indicator property
@@ -338,7 +338,9 @@ Real-time market data from the suggestion engine — updated every ~1s. Use in `
 | `AssetDiff01` | Float | Asset-level signal difference metric |
 | `Status` | Float | `1.0` = FastTrade mode, `0.0` = Normal |
 
-#### Candle — current real-time candle (1s or signal update rate)
+#### Candle — ~1s real-time analysis candle
+
+A very short-term (~1s) aggregation candle updated with each analysis tick. Represents the most recent price action window. **No history** — only the current window is available.
 
 ```json
 { "type": "Analysis", "value": { "type": "Candle", "property": "<field>" } }
@@ -348,23 +350,34 @@ Real-time market data from the suggestion engine — updated every ~1s. Use in `
 |----------|---------|-------------|
 | `Direction` | Direction | Candle direction (LONG if close > open) |
 | `Open` | Float | Candle open price |
-| `Close` | Float | Candle close price (current price) |
-| `High` | Float | Candle high |
-| `Low` | Float | Candle low |
+| `Close` | Float | Current price |
+| `High` | Float | Highest price in this window |
+| `Low` | Float | Lowest price in this window |
 | `Qty` | Float | Quote volume (USDT) |
 | `Qtym` | Float | Quote volume — market orders only |
 | `QtyAsset` | Float | Base asset volume |
 | `QtymAsset` | Float | Base asset volume — market orders only |
 
-#### FastCandle — last fast-trade aggregated candle
+#### FastCandle — accumulated candle during fast-trade mode
 
-Same properties as `Candle`. Use when `Indicator.Status == 1.0` (FastTrade mode).
+Accumulates trades **while the symbol is in FastTrade mode** (`Analysis.Indicator.Status == 1.0`). Represents the volume and price action of the entire fast-trade burst. Returns `None` when not in FastTrade mode — always guard with a `Status` check before using.
 
 ```json
-{ "type": "Analysis", "value": { "type": "FastCandle", "property": "Close" } }
+// Guard: only use FastCandle when in FastTrade mode
+{ "type": "Operation", "operation": "==",
+  "left":  { "type": "Analysis", "value": { "type": "Indicator", "property": "Status" } },
+  "right": { "type": "Number", "value": 1.0 } }
+
+{ "type": "Analysis", "value": { "type": "FastCandle", "property": "Qtym" } }
 ```
 
-#### Kline — closed candle at a specific timeframe
+Same properties as `Candle`. `Qtym`/`QtymAsset` are especially useful here to measure fast-trade market pressure.
+
+#### Kline — current real-time candle at a specific timeframe
+
+The **live, unfinished candle** at the given timeframe — updates in real-time with every tick.
+
+> To read **closed candles**, use `Indicator` with `idx: 0` (last closed candle), `idx: 1` (one before that), etc.
 
 ```json
 { "type": "Analysis", "value": { "type": "Kline", "tf": 3600, "property": "<field>" } }
@@ -376,9 +389,9 @@ Same properties as `Candle`. Use when `Indicator.Status == 1.0` (FastTrade mode)
 |----------|---------|-------------|
 | `Direction` | Direction | Candle direction (LONG if close > open) |
 | `Open` | Float | Kline open |
-| `Close` | Float | Kline close |
-| `High` | Float | Kline high |
-| `Low` | Float | Kline low |
+| `Close` | Float | Current price from this timeframe's perspective |
+| `High` | Float | Highest price so far in this candle |
+| `Low` | Float | Lowest price so far in this candle |
 
 #### OrderBook — level in the aggregated order book
 
