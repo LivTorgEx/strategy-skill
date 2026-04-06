@@ -23,11 +23,30 @@ description: LivTorgEx event handler reference — on_analysis, on_indicators, o
 
 ---
 
+## Bot lifecycle and `enter_price`
+
+Understanding when each handler fires requires understanding the bot lifecycle:
+
+1. **Bot group** checks `professional.filters` on each `min_tf` tick. If all filters pass → **spawns a new bot**.
+2. **`enter_price`** determines what the freshly spawned bot does immediately:
+   - `Force` — opens a position at market price right away. No `ForceStartPosition` action needed.
+   - `Wait` — bot is in a waiting state. **You must call `ForceStartPosition` from `on_analysis` or `on_indicators`** to actually enter.
+3. Once the bot has an open position, `on_analysis` / `on_indicators` run to manage it (exits, trailing stops, etc.).
+4. When the position closes, **`on_finished`** fires once.
+
+**Decision rule:**
+- Use `enter_price: Force` when the spawn conditions (in `professional.filters`) are sufficient to enter — e.g. fresh MRC cross + NTPS > 50.
+- Use `enter_price: Wait` + `on_analysis`/`on_indicators` entry action when you need a **two-phase** check: spawn on one condition, enter only when a secondary real-time condition passes.
+
+> **Re-spawn prevention:** `professional.filters` do NOT self-throttle. If conditions stay true across multiple `min_tf` ticks, a new bot spawns each tick (up to `max_active_bots`). Use one-candle events (e.g. `MRC PrevCross >= 1 AND CurrentCross < 1`) in filters to make the condition naturally single-fire per event.
+
+---
+
 ## `on_analysis` — use this by default
 
-The main strategy loop. Runs every ~1s with fresh price and indicator data. Use it to place orders, close positions, update variables, and react dynamically to market conditions.
+The main strategy loop. Runs every ~1s with fresh price and indicator data. Use it (with `enter_price: Wait`) to place orders, close positions, update variables, and react dynamically to market conditions.
 
-**Use for:** entry logic, exit logic, trailing stops, PnL checks, variable updates.
+**Use for:** entry logic (when `enter_price: Wait`), exit logic, trailing stops, PnL checks, variable updates.
 
 Each item: `{ "filters": [...], "action": {...} }` — all filters must pass for the action to run.
 

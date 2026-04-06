@@ -145,8 +145,17 @@ No daily. `min_tf` in signal definitions is in **minutes**.
 }
 ```
 
-**`professional.filters`** is the **search-mode gate** — the bot group evaluates these continuously to decide when to start a new bot. Use indicator conditions here (e.g. `ntps > 50`, `natr > 0.3`). All items are AND by default.
-**`on_analysis`** is the ~1s strategy loop — put entry conditions and exit logic here as `[{ "type": "Action", filters, action }]`.
+### `professional.filters` — bot spawn gate
+
+**Checked exactly once when the bot group decides to spawn a new bot** (on each `min_tf` tick). If all filters pass → a new bot is spawned. Filters are NOT re-evaluated after the bot is running. Use for quality gates: NTPS, NATR, MRC direction, distance checks. All items are AND by default.
+
+> **`enter_price` controls what happens immediately after spawn:**
+> - `Force` → the spawned bot opens a position at market **immediately** (no `on_analysis`/`on_indicators` needed for entry)
+> - `Wait` → the spawned bot waits; **you must call `ForceStartPosition` in `on_analysis` or `on_indicators`** to enter
+>
+> **Important:** `professional.filters` do NOT prevent re-spawning if conditions stay true for multiple `min_tf` ticks. Use `PrevCross`/`CurrentCross` guards or similar one-tick conditions in filters to ensure a single spawn per event.
+
+**`on_analysis`** is the ~1s strategy loop — put entry conditions (when using `Wait`) and exit logic here as `[{ "type": "Action", filters, action }]`.
 **`on_indicators`** fires on candle close — `[{ timeframe, filters, actions: [{ "type": "Action", ... }] }]`.
 **`on_finished`** fires when a position closes — same item shape as `on_analysis`: `[{ "type": "Action", filters, action }]`.
 **`on_actions`** is for manual UI triggers only — omit unless explicitly required.
@@ -154,12 +163,12 @@ No daily. `min_tf` in signal definitions is in **minutes**.
 
 ### `enter_price` types
 
-| Type | Description |
-|------|-------------|
-| `Force` | Enter at market price immediately |
-| `Wait` | Hold — let `on_analysis` open positions |
-| `Signal` | Enter at signal price |
-| `Indicator` | Enter at an indicator value |
+| Type | Behaviour after bot spawn |
+|------|--------------------------|
+| `Force` | Opens position at market price immediately on spawn — no action needed |
+| `Wait` | Spawns bot in waiting state — call `ForceStartPosition` from `on_analysis` or `on_indicators` |
+| `Signal` | Enters at the signal's suggested price |
+| `Indicator` | Enters at a computed indicator price |
 
 ### `enter_direction` types
 
