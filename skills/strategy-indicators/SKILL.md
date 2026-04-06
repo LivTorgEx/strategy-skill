@@ -43,7 +43,7 @@ description: LivTorgEx indicator reference. Use when building strategy filters o
 | `Psar` | no | `Direction`, `Distance`, `Price`, `NextSar`, `Ep`, `KLines` |
 | `EmaCross` | `"fast,slow"` e.g. `"12,26"` | `Direction`, `CrossPrice`, `PCP`, `KLines` |
 | `ChandelierExit` | no | `Direction`, `Long`, `Short` |
-| `Mrc` | `"20"` | `Direction`, `MeanLine`, `Up/DownInner/Small/Outer/Big`, `CurrentCross` −4…+4, `PrevCross` |
+| `Mrc` | `"200"` | `Direction`, `MeanLine`, `Up/DownInner/Small/Outer/Big`, `CurrentCross` −4…+4, `PrevCross` |
 | `Imbalance` | no | `Direction`, `High`, `Low`, `KLines`, `Fill`, `HighFill` |
 | `Window` | no | `Buy/Sell/CrossDirection/Price/Cross/KLines/Qtym`, `CrossLineDirection`, `CrossTimes` |
 | `Wave` | no | `Direction`, `Qtym`, `TotalQtym`, `Klines`, `CrossKlines`, `Percentile`, `Min`, `Max`, `OP`, `CP` |
@@ -144,9 +144,9 @@ ATR trail from highest high / lowest low. `Long`/`Short` = stop price levels. No
 
 ### Mrc
 ```json
-{ "type": "Mrc", "period": "20", "property": "CurrentCross" }
+{ "type": "Mrc", "period": "200", "property": "CurrentCross" }
 ```
-Multi-band channel. `CurrentCross` ∈ {−4…+4}: 0 = mean, +4 = extreme upper, −4 = extreme lower.
+Multi-band channel. `CurrentCross` ∈ {−4…+4}: 0 = mean, +4 = extreme upper, −4 = extreme lower. Recommended period: `"200"`.
 
 ### Imbalance
 ```json
