@@ -181,13 +181,34 @@ No daily. `min_tf` in signal definitions is in **minutes**.
 
 ---
 
+## What is a bot?
+
+A **bot** is an instance of real-time market monitoring created by the bot group. It is NOT just a position — a bot can:
+
+- **Monitor the market** to update its own variables or run actions (even with no open position)
+- **Start a position** via `ForceStartPosition` (from `on_analysis`, `on_indicators`, or automatic via `enter_price: Force`)
+- **Stop a position** via `ForceStopPosition`
+- **Wait** — if spawned with `enter_price: Wait` and no `ForceStartPosition` is called, the bot runs in waiting mode monitoring conditions. A waiting bot can be stopped (e.g. `ForceStopBot` if conditions no longer apply).
+
+A bot's life: **spawned → (optional waiting) → position open → position closed → finished**. `on_finished` fires on position close; the bot then exits.
+
+### `max_active_bots` and margin
+
+`max_active_bots` caps how many bots can be alive simultaneously. This directly limits capital exposure:
+
+> Example: `margin = 5.0`, `max_active_bots = 3` → maximum simultaneous exposure = $15.
+
+A bot can open positions larger than its initial margin if it has accumulated **live profit** during its lifetime — unrealised gains can be used as extra margin while the bot is running.
+
+---
+
 ## Signal types
 
-The `signal` field controls how frequently the bot group rechecks `professional.filters` to start a new bot. `min_tf` is in **seconds** — use `min_tf: 60` to recheck every 1 minute.
+The `signal` field defines the **trigger source** that causes the bot group to check `professional.filters` and potentially spawn a new bot. `Indicator` (candle-close timer) is the most common, but other sources react to external market events.
 
 | Name | Extra fields | Notes |
 |------|-------------|-------|
-| `Indicator` | `min_tf: int (seconds)` | **Default choice.** Rechecks filters every `min_tf` seconds. Use `min_tf: 60` for 1m recheck. |
+| `Indicator` | `min_tf: int (seconds)` | **Default choice.** Rechecks filters on each candle close at `min_tf` interval. Use `min_tf: 60` for 1m. |
 | `FastTrade` | — | — |
 | `OverTrend` | `min_arrange`, `max_arrange`, `min_4h_wave_prc` | — |
 | `ATH4H` | `min_4h_wave_prc`, `reason: "Always"\|"OnlyLine"\|"LineOrMovement"` | — |
@@ -195,7 +216,7 @@ The `signal` field controls how frequently the bot group rechecks `professional.
 | `CrossLine` | `timeframe: int (seconds)`, `min_mins: int` | — |
 | `QtymSpike` | — | — |
 | `Action` | `code: string` | — |
-| `External` | `signal_id: int` | External signal source; does not drive filter recheck frequency. |
+| `External` | `signal_id: int` | External signal source; does not drive filter recheck by timer. |
 
 ---
 

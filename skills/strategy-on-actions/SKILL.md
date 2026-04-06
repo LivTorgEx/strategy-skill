@@ -23,22 +23,44 @@ description: LivTorgEx event handler reference — on_analysis, on_indicators, o
 
 ---
 
+## What is a bot?
+
+A **bot** is an instance of real-time market monitoring created by the bot group. It is NOT just a position — a bot can:
+
+- **Monitor the market** with no open position — updating variables, watching conditions
+- **Start a position** via `ForceStartPosition` (explicitly in actions, or automatically via `enter_price: Force`)
+- **Stop a position** via `ForceStopPosition`
+- **Stop itself** via `ForceStopBot` (exits the bot entirely, even with no position)
+
+Bot states: `waiting` (no position) → `active` (has position) → `finished` (position closed). `on_finished` fires on position close.
+
+### `max_active_bots` and margin
+
+`max_active_bots` limits how many bots exist simultaneously. This caps total capital deployment:
+
+> `margin = 5.0`, `max_active_bots = 3` → max simultaneous exposure = **$15**
+
+A bot can open positions larger than its initial margin if it has accumulated **live (unrealised) profit** during its lifetime — that profit can be used as extra margin while the bot is running.
+
+---
+
 ## Bot lifecycle and `enter_price`
 
 Understanding when each handler fires requires understanding the bot lifecycle:
 
-1. **Bot group** checks `professional.filters` on each `min_tf` tick. If all filters pass → **spawns a new bot**.
-2. **`enter_price`** determines what the freshly spawned bot does immediately:
+1. **Bot group** evaluates `professional.filters` when triggered by the `signal`. If all filters pass → **spawns a new bot** (subject to `max_active_bots`).
+2. The `signal` defines *what triggers the filter check* — it is not limited to a timer. `Indicator` (candle-close) is most common, but signals can react to external events, volume spikes, etc.
+3. **`enter_price`** determines what the freshly spawned bot does immediately:
    - `Force` — opens a position at market price right away. No `ForceStartPosition` action needed.
-   - `Wait` — bot is in a waiting state. **You must call `ForceStartPosition` from `on_analysis` or `on_indicators`** to actually enter.
-3. Once the bot has an open position, `on_analysis` / `on_indicators` run to manage it (exits, trailing stops, etc.).
-4. When the position closes, **`on_finished`** fires once.
+   - `Wait` — bot starts in waiting state. **You must call `ForceStartPosition` from `on_analysis` or `on_indicators`** to enter. Use `ForceStopBot` to exit if conditions expire without entering.
+4. Once the bot has an open position, `on_analysis` / `on_indicators` run continuously to manage it.
+5. When the position closes, **`on_finished`** fires once, then the bot exits.
 
 **Decision rule:**
-- Use `enter_price: Force` when the spawn conditions (in `professional.filters`) are sufficient to enter — e.g. fresh MRC cross + NTPS > 50.
-- Use `enter_price: Wait` + `on_analysis`/`on_indicators` entry action when you need a **two-phase** check: spawn on one condition, enter only when a secondary real-time condition passes.
+- Use `enter_price: Force` when spawn conditions in `professional.filters` are sufficient to enter immediately — e.g. fresh MRC cross + NTPS > 50.
+- Use `enter_price: Wait` when you need a **two-phase** approach: spawn on one condition, then enter only when a secondary real-time condition passes in `on_analysis`/`on_indicators`.
 
-> **Re-spawn prevention:** `professional.filters` do NOT self-throttle. If conditions stay true across multiple `min_tf` ticks, a new bot spawns each tick (up to `max_active_bots`). Use one-candle events (e.g. `MRC PrevCross >= 1 AND CurrentCross < 1`) in filters to make the condition naturally single-fire per event.
+> **Re-spawn prevention:** `professional.filters` do NOT self-throttle. If conditions stay true across multiple signal ticks, a new bot spawns each tick (up to `max_active_bots`). Use one-candle events (e.g. `MRC PrevCross >= 1 AND CurrentCross < 1`) in filters to make the condition naturally single-fire per event.
 
 ---
 
