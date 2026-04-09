@@ -462,4 +462,8 @@ Use `on_indicators` to detect an EMA direction change on the 5m chart and store 
 ]
 ```
 
-> **Note on waiting mode:** When a bot is in **waiting mode** (no open position, after `on_finished`), do NOT use `Position.Amount == 0` as a guard in `on_indicators` — in waiting mode `Position.Amount` may not resolve correctly. Instead track state with a **variable** (e.g. `position_count == 1`) to know the bot is waiting for re-entry.
+> **Note on waiting mode:** When a bot is in **waiting mode** (no open position, after `on_finished`), do NOT use `Position.Amount == 0` as a guard in `on_indicators` — in waiting mode `Position.Amount` may not resolve correctly. Use `IsEmpty` with a Position value to reliably detect no active position:
+> ```json
+> { "type": "IsEmpty", "value": { "type": "Position", "side": { "type": "Direction", "value": "LONG" }, "value": "Amount" } }
+> ```
+> Combine with a variable flag (e.g. `position_count == 1`) to track which lifecycle stage the bot is in.
