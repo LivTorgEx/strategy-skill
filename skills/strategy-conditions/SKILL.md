@@ -18,6 +18,11 @@ description: LivTorgEx condition, value, and action syntax reference. Use when b
   "values": [ /* condition, ... */ ] }
 
 { "type": "IsEmpty", "value": { /* value */ } }
+
+// Conditional value selection: returns first matching value, or default
+{ "type": "Pick",
+  "values": [ { "filters": [ /* conditions */ ], "value": { /* value */ } }, ... ],
+  "default": { /* value — optional fallback */ } }
 ```
 
 ### `<A` / `>A` — direction-aware auto-reversing comparisons
@@ -108,7 +113,10 @@ Use `<A`/`>A` when the same condition should work for both long and short entrie
   "order_type": "MARKET" | "LIMIT" | "STOP_MARKET" | "STOP_LIMIT",
   "pside": { /* value */ }, "mark": { /* value */ }, "msg": "label" }
 
-{ "type": "RemoveOrder", "mark": { /* value */ }, "pside": { /* value */ } }
+// CreateOrder with mark is an UPSERT — if an order with the same mark already exists,
+// it updates the price and qty instead of creating a new order.
+// Use this to trail a limit order on every candle without RemoveOrder+CreateOrder.
+// RemoveOrder is only needed if you want to explicitly cancel without replacing.
 
 { "type": "SetVariable",    "name": "var_key", "value": { /* value */ } }
 { "type": "ClearVariable",  "name": "var_key" }
@@ -120,6 +128,9 @@ Use `<A`/`>A` when the same condition should work for both long and short entrie
 { "type": "ForceStopBot",   "msg": "reason" }
 { "type": "Wait" }
 { "type": "Break", "level": 1 }
+
+// Sequential block — groups multiple sub-actions (each with their own filters)
+{ "type": "Actions", "actions": [ { "filters": [...], "action": {...} }, ... ] }
 ```
 
 ---

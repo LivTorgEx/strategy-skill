@@ -4,7 +4,9 @@
   "skills": [
     "./skills/",
     "./skills/analysis",
-    "./skills/strategy-values"
+    "./skills/strategy-values",
+    "./skills/strategy-initialization",
+    "./skills/strategy-modifications"
   ],
   "keywords": [
     "claude-code",
