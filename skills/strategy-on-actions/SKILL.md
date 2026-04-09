@@ -13,13 +13,14 @@ description: LivTorgEx event handler reference — on_analysis, on_indicators, o
 "professional": {
   "variables": [],
   "on_analysis":   [ { "type": "Action", "filters": [], "action": {} } ],
+  "on_created":    [ { "type": "Action", "filters": [], "action": {} } ],
   "on_indicators": [ { "timeframe": 300, "filters": [], "actions": [ { "type": "Action", "filters": [], "action": {} } ] } ],
   "on_finished":   [ { "type": "Action", "filters": [], "action": {} } ],
   "on_actions":    [ { "name": "manual_close", "params": [], "actions": [] } ]
 }
 ```
 
-**IMPORTANT:** Every item in `on_analysis`, `on_finished`, and `on_indicators[].actions` **must** include `"type": "Action"` as the first field.
+**IMPORTANT:** Every item in `on_analysis`, `on_created`, `on_finished`, and `on_indicators[].actions` **must** include `"type": "Action"` as the first field.
 
 ---
 
@@ -66,11 +67,75 @@ Understanding when each handler fires requires understanding the bot lifecycle:
 
 ---
 
+## `on_created` — fires once when a new position opens
+
+`on_created` fires **once** immediately after a position is opened (first entry order fills). Use for one-time position setup that depends on the actual entry price or entry side.
+
+**Use for:** setting variables from entry price, logging entry, one-time setup.
+**Prefer over `on_analysis`** for setup to avoid re-running on every tick.
+
+```json
+"on_created": [
+  {
+    "type": "Action",
+    "filters": [],
+    "action": {
+      "type": "SetVariable",
+      "name": "initial_entry",
+      "value": { "type": "Position", "value": "EntryPrice" }
+    }
+  }
+]
+```
+
+---
+
+## `direction: "Both"` — LONG + SHORT in a single bot
+
+`direction: "Both"` allows a single bot to use both LONG and SHORT. This enables two patterns:
+
+- **Hedge mode** — hold LONG and SHORT positions simultaneously (both open at the same time)
+- **Reversal mode** — close one side and open the opposite (bot reverses direction)
+
+`Long` and `Short` restrict the bot to a single direction only.
+
+**Settings when using `Both`:**
+- `max_active_bots` — controls how many bots (symbols) the group can run; not related to direction
+- `enter_price` — any type is valid; describes what the bot does after starting
+- `margin_mode` — any; cross margin is preferred over isolated
+
+```json
+"on_analysis": [
+  {
+    "type": "Action",
+    "filters": [
+      { "type": "Operation", "operation": "==",
+        "left":  { "type": "Position", "side": { "type": "Direction", "value": "LONG" }, "value": "Amount" },
+        "right": { "type": "Number", "value": 0 } }
+    ],
+    "action": { "type": "ForceStartPosition", "side": { "type": "Direction", "value": "LONG" }, "msg": "Open LONG" }
+  },
+  {
+    "type": "Action",
+    "filters": [
+      { "type": "Operation", "operation": "==",
+        "left":  { "type": "Position", "side": { "type": "Direction", "value": "SHORT" }, "value": "Amount" },
+        "right": { "type": "Number", "value": 0 } }
+    ],
+    "action": { "type": "ForceStartPosition", "side": { "type": "Direction", "value": "SHORT" }, "msg": "Open SHORT" }
+  }
+]
+```
+
+> **Re-entry:** Use `on_finished` to re-open the closed side. Check `on_finished` section above for the revert/re-entry pattern.
+
+---
+
 ## `on_analysis` — use this by default
 
-The main strategy loop. Runs every ~1s with fresh price and indicator data. Use it (with `enter_price: Wait`) to place orders, close positions, update variables, and react dynamically to market conditions.
+The main strategy loop. Runs every ~1s with fresh price and indicator data. Use it to place orders, close positions, update variables, and react dynamically to market conditions.
 
-**Use for:** entry logic (when `enter_price: Wait`), exit logic, trailing stops, PnL checks, variable updates.
+**Use for:** entry logic, exit logic, trailing stops, PnL checks, variable updates.
 
 Each item: `{ "filters": [...], "action": {...} }` — all filters must pass for the action to run.
 
@@ -353,3 +418,48 @@ Use `on_indicators` to detect an EMA direction change on the 5m chart and store 
 { "type": "Wait" }
 { "type": "Break", "level": 1 }
 ```
+
+### `Break` — early exit from nested action lists
+
+`Break` stops processing the current action list and optionally exits outer levels.
+
+- `level: 1` — exits the **current** action list (the `Actions` block or the handler array you're in)
+- `level: 2` — exits **2 levels**: the current block AND the outer handler list (e.g., exits both the inner `Actions.actions[]` and the outer `on_finished[]`)
+- Higher levels exit that many levels of nesting
+
+**Use in `on_finished` to prevent a catch-all fallback from running after a conditional branch:**
+
+```json
+// on_finished with conditional branches — only one branch fires
+"on_finished": [
+  {
+    "type": "Action",
+    "filters": [ { /* condition A — e.g. SL hit */ } ],
+    "action": {
+      "type": "Actions",
+      "actions": [
+        { "filters": [], "action": { "type": "ForceStopBot", "msg": "SL — stop" } },
+        { "filters": [], "action": { "type": "Break", "level": 2 } }
+      ]
+    }
+  },
+  {
+    "type": "Action",
+    "filters": [ { /* condition B — e.g. TP hit */ } ],
+    "action": {
+      "type": "Actions",
+      "actions": [
+        { "filters": [], "action": { "type": "SetVariable", "name": "counter", "value": { "type": "Number", "value": 0 } } },
+        { "filters": [], "action": { "type": "Break", "level": 2 } }
+      ]
+    }
+  },
+  {
+    "type": "Action",
+    "filters": [],
+    "action": { "type": "ForceStopBot", "msg": "Fallback — should never run after A or B" }
+  }
+]
+```
+
+> **Note on waiting mode:** When a bot is in **waiting mode** (no open position, after `on_finished`), do NOT use `Position.Amount == 0` as a guard in `on_indicators` — in waiting mode `Position.Amount` may not resolve correctly. Instead track state with a **variable** (e.g. `position_count == 1`) to know the bot is waiting for re-entry.

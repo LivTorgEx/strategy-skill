@@ -38,7 +38,13 @@ Construct a valid `BotGroupSetting`. For indicator details use `strategy-indicat
 
 ### Step 4 — Validate
 
+```bash
+curl -s -X POST "$LIVTORGEX_SKILL_URL/api/validate_bot_group" \
+  -H "Content-Type: application/json" \
+  -d '{ "settings": <FULL_SETTINGS_JSON> }'
+```
 
+Response: `{ "valid": true|false, "errors": [...], "warnings": [...] }`.
 
 Fix all `errors`. `warnings` are non-blocking.
 
@@ -188,7 +194,7 @@ A **bot** is an instance of real-time market monitoring created by the bot group
 - **Monitor the market** to update its own variables or run actions (even with no open position)
 - **Start a position** via `ForceStartPosition` (from `on_analysis`, `on_indicators`, or automatic via `enter_price: Force`)
 - **Stop a position** via `ForceStopPosition`
-- **Wait** — if spawned with `enter_price: Wait` and no `ForceStartPosition` is called, the bot runs in waiting mode monitoring conditions. A waiting bot can be stopped (e.g. `ForceStopBot` if conditions no longer apply).
+- **Wait** — the bot spawns in waiting mode, monitoring conditions until a `ForceStartPosition` action triggers entry. A waiting bot can be stopped (e.g. `ForceStopBot` if conditions no longer apply).
 
 A bot's life: **spawned → (optional waiting) → position open → position closed → finished**. `on_finished` fires on position close; the bot then exits.
 
