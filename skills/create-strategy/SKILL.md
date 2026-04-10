@@ -126,6 +126,7 @@ No daily. `min_tf` in signal definitions is in **minutes**.
     "name": "Trading",
     "max_open_amount": 500.0,
     "direction": "Long" | "Short" | "Both",
+    /* Long/Short — single direction only. Both — bot can use LONG and SHORT (hedge or reversal). */
     "professional": {
       "type": "Professional",
       "variables": [],
