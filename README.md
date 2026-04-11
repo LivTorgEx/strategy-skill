@@ -14,15 +14,35 @@ When you ask Claude to create a strategy, it will:
 
 ## Installation
 
-### Install from GitHub
+### GitHub Copilot CLI
 
+Install from GitHub:
+```bash
+copilot plugin install LivTorgEx/strategy-skill
+```
+
+Install from local path:
+```bash
+copilot plugin install ~/dev/strategy-skill
+```
+
+Update / reinstall:
+```bash
+copilot plugin uninstall livtorgex-strategy-skill
+copilot plugin install ~/dev/strategy-skill
+```
+
+> You can also ask Copilot directly: *"reinstall strategy-skill"* and it will run the commands above.
+
+### Claude Code
+
+Install from GitHub:
 ```bash
 claude plugin marketplace add LivTorgEx/strategy-skill
 claude plugin install livtorgex-strategy-skill@LivTorgEx/strategy-skill
 ```
 
-### Install from local path (if you cloned the repo)
-
+Install from local path:
 ```bash
 claude plugin marketplace add /path/to/strategy-skill
 claude plugin install livtorgex-strategy-skill@strategy-skill
