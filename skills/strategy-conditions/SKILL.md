@@ -25,6 +25,12 @@ description: LivTorgEx condition, value, and action syntax reference. Use when b
   "default": { /* value — optional fallback */ } }
 ```
 
+**⚠️ `>=` and `<=` are NOT valid operations — the server will reject them.** Convert:
+- `x >= N` (integer) → `x > N-1`  (e.g. `CurrentCross >= 2` → `CurrentCross > 1`)
+- `x <= -N` (integer) → `x < -(N-1)` (e.g. `CurrentCross <= -2` → `CurrentCross < -1`)
+- Counter `>= 1` → `> 0`
+- Float `<= 0` (e.g. Pnl) → `< 0.01` (practical approximation for non-positive)
+
 ### `<A` / `>A` — direction-aware auto-reversing comparisons
 
 These operations flip their meaning based on `global.direction`:
