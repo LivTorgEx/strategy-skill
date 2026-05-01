@@ -1,0 +1,13 @@
+[package]
+name = "strategy-module-scaffold"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "module_entry"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+lte_strategy_bridge = { git = "https://github.com/LivTorgEx/lte_strategy_bridge.git" }

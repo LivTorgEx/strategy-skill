@@ -1,0 +1,15 @@
+{
+  "margin_mode": "Isolated",
+  "margin_leverage": 20,
+  "signal": {
+    "name": "Indicator",
+    "min_tf": 60
+  },
+  "strategy": {
+    "name": "DynamicModule",
+    "module_id": "00000000-0000-0000-0000-000000000000",
+    "module_version": "0.1.0",
+    "max_open_amount": 500.0,
+    "direction": "BOTH"
+  }
+}

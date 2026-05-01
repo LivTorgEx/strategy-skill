@@ -1,0 +1,11 @@
+{
+  "module_id": "00000000-0000-0000-0000-000000000000",
+  "name": "my-strategy-module",
+  "version": "0.1.0",
+  "runtime": "wasm",
+  "target": "wasm32-wasip1",
+  "artifact": {
+    "bucket": "strategy-modules",
+    "object_key": "modules/00000000-0000-0000-0000-000000000000/0.1.0/module.wasm"
+  }
+}

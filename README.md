@@ -2,6 +2,19 @@
 
 A Claude Code plugin that lets your AI agent design and deploy trading bot group strategies directly to a LivTorgEx server.
 
+## Two solutions
+
+This repository now documents two ways to create strategy implementations:
+
+1. Strategy settings JSON (skill-driven): [solutions/strategy-settings/README.md](solutions/strategy-settings/README.md)
+2. Rust WASM DynamicModule implementation: [solutions/strategy-rust-module/README.md](solutions/strategy-rust-module/README.md)
+
+Repository layout:
+
+- skills/ -> plugin skills used by Claude/Copilot
+- solutions/strategy-settings/ -> settings-based strategy workflow
+- solutions/strategy-rust-module/ -> Rust module scaffold and guide
+
 ## What it does
 
 When you ask Claude to create a strategy, it will:
