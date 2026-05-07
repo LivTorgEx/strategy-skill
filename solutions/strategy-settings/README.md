@@ -10,8 +10,8 @@ This is a minimal sample strategy settings payload for:
 ## Environment
 
 ```bash
-export LIVTORGEX_SKILL_URL="https://skill.api.livtorgex.com"
-export LIVTORGEX_SKILL_TOKEN="lt_..."
+export LIVTORGEX_MCP_URL="https://skill.api.livtorgex.com"
+export LIVTORGEX_MCP_TOKEN="lt_..."
 ```
 
 ## Sample FULL_FORM_JSON
@@ -92,7 +92,7 @@ Replace `api_key_id` and `symbol_ids` before deploy.
 ## Validate
 
 ```bash
-curl -s -X POST "$LIVTORGEX_SKILL_URL/api/validate_bot_group" \
+curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/validate_bot_group" \
   -H "Content-Type: application/json" \
   -d '{"settings": <SETTINGS_JSON_ONLY>}'
 ```
@@ -100,8 +100,8 @@ curl -s -X POST "$LIVTORGEX_SKILL_URL/api/validate_bot_group" \
 ## Deploy
 
 ```bash
-curl -s -X POST "$LIVTORGEX_SKILL_URL/api/bot_group" \
-  -H "Authorization: Bearer $LIVTORGEX_SKILL_TOKEN" \
+curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/bot_group" \
+  -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN" \
   -H "Content-Type: application/json" \
   -d '<FULL_FORM_JSON>'
 ```

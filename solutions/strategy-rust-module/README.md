@@ -42,8 +42,8 @@ cargo build --target wasm32-wasip1 --release
 4. Upload module bytes via API:
 
 ```bash
-curl -s -X POST "$LIVTORGEX_SKILL_URL/api/modules/<MODULE_ID>/<VERSION>/upload" \
-  -H "Authorization: Bearer $LIVTORGEX_SKILL_TOKEN" \
+curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/modules/<MODULE_ID>/<VERSION>/upload" \
+  -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN" \
   -H "Content-Type: application/octet-stream" \
   --data-binary @target/wasm32-wasip1/release/module_entry.wasm
 ```
@@ -101,8 +101,8 @@ cargo build --target wasm32-wasip1 --release
 4. Upload module bytes via API:
 
 ```bash
-curl -s -X POST "$LIVTORGEX_SKILL_URL/api/modules/<MODULE_ID>/<VERSION>/upload" \
-  -H "Authorization: Bearer $LIVTORGEX_SKILL_TOKEN" \
+curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/modules/<MODULE_ID>/<VERSION>/upload" \
+  -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN" \
   -H "Content-Type: application/octet-stream" \
   --data-binary @target/wasm32-wasip1/release/module_entry.wasm
 ```
@@ -119,6 +119,6 @@ curl -s -X POST "$LIVTORGEX_SKILL_URL/api/modules/<MODULE_ID>/<VERSION>/upload" 
 ## Required env
 
 ```bash
-export LIVTORGEX_SKILL_URL="https://skill.api.livtorgex.com"
-export LIVTORGEX_SKILL_TOKEN="lt_..."
+export LIVTORGEX_MCP_URL="https://skill.api.livtorgex.com"
+export LIVTORGEX_MCP_TOKEN="lt_..."
 ```

@@ -86,8 +86,8 @@ Add to your project's `.claude/settings.json`:
 Set these environment variables (add to your shell profile or `.env`):
 
 ```bash
-export LIVTORGEX_SKILL_URL="https://skill.api.livtorgex.com"
-export LIVTORGEX_SKILL_TOKEN="lt_..."   # get from Account → Skill → Connect
+export LIVTORGEX_MCP_URL="https://skill.api.livtorgex.com"
+export LIVTORGEX_MCP_TOKEN="lt_..."   # get from Account → Setup → AI Connections
 ```
 
 ## Usage

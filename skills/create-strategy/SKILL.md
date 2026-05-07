@@ -9,8 +9,8 @@ description: Design a LivTorgEx trading strategy and deploy it as a bot group. U
 
 | Variable | Description |
 |----------|-------------|
-| `LIVTORGEX_SKILL_URL` | Skill API base URL, e.g. `https://skill.api.livtorgex.com` |
-| `LIVTORGEX_SKILL_TOKEN` | Personal access token (`lt_<...>`) — get from `/skill/connect` |
+| `LIVTORGEX_MCP_URL` | Skill API base URL, e.g. `https://skill.api.livtorgex.com` |
+| `LIVTORGEX_MCP_TOKEN` | Personal access token (`lt_<...>`) — get from `/mcp/connect/authorize-url` |
 
 ---
 
@@ -19,11 +19,11 @@ description: Design a LivTorgEx trading strategy and deploy it as a bot group. U
 ### Step 1 — Fetch account context
 
 ```bash
-curl -s "$LIVTORGEX_SKILL_URL/api/account/api_keys" \
-  -H "Authorization: Bearer $LIVTORGEX_SKILL_TOKEN"
+curl -s "$LIVTORGEX_MCP_URL/mcp/account/api_keys" \
+  -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN"
 
-curl -s "$LIVTORGEX_SKILL_URL/api/bot_groups" \
-  -H "Authorization: Bearer $LIVTORGEX_SKILL_TOKEN"
+curl -s "$LIVTORGEX_MCP_URL/mcp/bot_groups" \
+  -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN"
 ```
 
 Present API keys by name. Warn if target bot group has `skill_access: "Read"` or `"Deny"`.
@@ -39,7 +39,7 @@ Construct a valid `BotGroupSetting`. For indicator details use `strategy-indicat
 ### Step 4 — Validate
 
 ```bash
-curl -s -X POST "$LIVTORGEX_SKILL_URL/api/validate_bot_group" \
+curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/validate_bot_group" \
   -H "Content-Type: application/json" \
   -d '{ "settings": <FULL_SETTINGS_JSON> }'
 ```
@@ -51,8 +51,8 @@ Fix all `errors`. `warnings` are non-blocking.
 ### Step 5 — Deploy
 
 ```bash
-curl -s -X POST "$LIVTORGEX_SKILL_URL/api/bot_group" \
-  -H "Authorization: Bearer $LIVTORGEX_SKILL_TOKEN" \
+curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/bot_group" \
+  -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN" \
   -H "Content-Type: application/json" \
   -d '<FULL_FORM_JSON>'
 ```
@@ -65,8 +65,8 @@ After deploying, offer the user a backtest to validate the strategy on historica
 Ask for: `start_time` (e.g. 30 days ago), `end_time` (now or leave blank for open-ended).
 
 ```bash
-curl -s -X POST "$LIVTORGEX_SKILL_URL/api/bot_groups/<BOT_GROUP_ID>/run_backtest" \
-  -H "Authorization: Bearer $LIVTORGEX_SKILL_TOKEN" \
+curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/bot_groups/<BOT_GROUP_ID>/run_backtest" \
+  -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "start_time": "2025-01-01 00:00:00",

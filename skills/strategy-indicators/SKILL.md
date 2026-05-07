@@ -8,8 +8,8 @@ description: LivTorgEx indicator reference. Use when building strategy filters o
 Call this endpoint to get all available indicators with their valid `type`, available `period` values, and `property` values. No query parameters.
 
 ```
-GET /api/indicators
-Authorization: Bearer <skill-token>
+GET /mcp/indicators
+Authorization: Bearer <mcp-token>
 ```
 
 ### Response schema

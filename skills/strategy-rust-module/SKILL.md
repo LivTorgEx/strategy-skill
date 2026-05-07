@@ -12,8 +12,8 @@ description: >
 
 | Variable | Description |
 |----------|-------------|
-| `LIVTORGEX_SKILL_URL` | Skill API base URL, e.g. `http://localhost:8003` |
-| `LIVTORGEX_SKILL_TOKEN` | Personal access token (`lt_<...>`) — get from `/skill/connect` |
+| `LIVTORGEX_MCP_URL` | Skill API base URL, e.g. `http://localhost:8003` |
+| `LIVTORGEX_MCP_TOKEN` | Personal access token (`lt_<...>`) — get from `/mcp/connect/authorize-url` |
 
 ---
 
@@ -124,8 +124,8 @@ Read `module_id` and `version` from `module.manifest.json`, then upload:
 MODULE_ID=$(jq -r .module_id module.manifest.json)
 VERSION=$(jq -r .version module.manifest.json)
 
-curl -s -X POST "$LIVTORGEX_SKILL_URL/api/modules/$MODULE_ID/$VERSION/upload" \
-  -H "Authorization: Bearer $LIVTORGEX_SKILL_TOKEN" \
+curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/modules/$MODULE_ID/$VERSION/upload" \
+  -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN" \
   -H "Content-Type: application/octet-stream" \
   --data-binary @target/wasm32-wasip1/release/module_entry.wasm
 ```
@@ -170,8 +170,8 @@ Bot group `strategy` block:
 Deploy with the Skill API (same as settings-based strategy):
 
 ```bash
-curl -s -X POST "$LIVTORGEX_SKILL_URL/api/bot_group" \
-  -H "Authorization: Bearer $LIVTORGEX_SKILL_TOKEN" \
+curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/bot_group" \
+  -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN" \
   -H "Content-Type: application/json" \
   -d '<FULL_FORM_JSON>'
 ```
