@@ -261,6 +261,49 @@ Each item: `{ "name": "...", "params": [...], "actions": [...] }`
 
 ---
 
+## `FireAlert` — send a push notification from inside a strategy
+
+Use `FireAlert` anywhere an action is allowed (`on_analysis`, `on_indicators`, `on_finished`, `on_created`, `on_actions`). When evaluated, it queues a notification that:
+
+1. Is **persisted** to the user's notification table (visible in the bell feed).
+2. Is **broadcast over WebSocket** to connected clients in real time.
+
+```json
+{ "type": "FireAlert", "msg": "TP hit on BTC-USDT" }
+```
+
+**Rules:**
+- `msg` is required and must be a **non-empty string**. Empty or whitespace-only messages are silently ignored.
+- `msg` is a plain string — not a value expression. Keep it short and descriptive.
+- Use `filters` on the enclosing `Action` item to control when the alert fires.
+
+**Common patterns:**
+
+```json
+// Notify when a position's PnL crosses $200
+{
+  "type": "Action",
+  "filters": [
+    { "type": "Operation", "operation": ">",
+      "left":  { "type": "Position", "side": { "type": "Direction", "value": "LONG" }, "value": "Pnl" },
+      "right": { "type": "Number", "value": 200.0 } }
+  ],
+  "action": { "type": "FireAlert", "msg": "PnL > $200 on LONG" }
+}
+
+// Notify when the bot stops
+{
+  "type": "Action",
+  "filters": [],
+  "action": { "type": "FireAlert", "msg": "Bot stopped" }
+}
+// (add this as the first item in on_finished before ForceStopBot)
+```
+
+> **Note:** `FireAlert` is fire-and-forget — it does not block subsequent actions or affect bot state. It can coexist with any other action in the same handler.
+
+---
+
 ## Variables — storing strategy state
 
 `variables` is declared at the top of `professional` and holds named values that persist across ticks. Use them to share state between `on_indicators` and `on_analysis`, track multi-step conditions, or accumulate counters.

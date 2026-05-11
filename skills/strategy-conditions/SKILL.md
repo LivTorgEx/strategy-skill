@@ -135,6 +135,11 @@ Use `<A`/`>A` when the same condition should work for both long and short entrie
 { "type": "Wait" }
 { "type": "Break", "level": 1 }
 
+// Fire an alert notification — sends a push notification to the user.
+// msg must be a non-empty string. The notification appears in the user's
+// notification bell and is also broadcast over WebSocket in real time.
+{ "type": "FireAlert", "msg": "TP hit on BTC-USDT" }
+
 // Sequential block — groups multiple sub-actions (each with their own filters)
 { "type": "Actions", "actions": [ { "filters": [...], "action": {...} }, ... ] }
 ```
