@@ -78,6 +78,58 @@ The response contains `version_id`. The user can review the backtest in the UI.
 - A linked backtest container is created once per bot group and reused on subsequent calls.
 - Requires `skill_access` = "Edit".
 
+### Step 7 — Run a signal action on a live bot group (optional)
+
+Signal actions let you manually trigger strategy logic on a running bot group (e.g. force-enter a position, set a grid range, change direction).
+
+**First, discover available actions:** `list_bot_groups` returns `signal_actions` on each group. Each entry has:
+```json
+{
+  "name": "Human readable name",
+  "code": "action_code",
+  "description": "optional description",
+  "params": [
+    { "name": "Grid lower", "code": "grid_lower", "variant": "Number" },
+    { "name": "Grid upper", "code": "grid_upper", "variant": "Number" },
+    { "name": "Side",       "code": "side",        "variant": "Direction" },
+    { "name": "Type",       "code": "order_type",  "variant": "Select", "options": [{"label":"Market","value":0},{"label":"Limit","value":1}] }
+  ]
+}
+```
+
+**Param variant → value format:**
+
+| Variant | Value format | Example |
+|---------|-------------|---------|
+| `Number` | `f64` | `45000.0` |
+| `Direction` | `"buy"` or `"sell"` | `"buy"` |
+| `OrderType` | `"Market"` or `"Limit"` | `"Market"` |
+| `PriceRange` | Two keys: `{code}_lower` and `{code}_upper` (both `f64`) | `"range_lower": 44000.0, "range_upper": 46000.0` |
+| `Select` | Numeric index of the selected option (`f64`) | `0.0` (first option) |
+
+Call MCP tool: `run_bot_group_action`
+Arguments:
+```json
+{
+  "bot_group_id": <ID>,
+  "code": "action_code",
+  "symbol_key": "OKX#BTC-USDT-SWAP",
+  "price": 45000.0,
+  "direction": "buy",
+  "leverage": null,
+  "margin": null,
+  "values": {
+    "grid_lower": 44000.0,
+    "grid_upper": 46000.0
+  }
+}
+```
+
+- `price` is **required** — pass the current market price for the symbol.
+- `direction` defaults to `"buy"` if omitted.
+- `values` may be empty `{}` if the action has no params.
+- Bot group must have `skill_access` = `"Edit"` and must not be linked to a strategy NFT worker.
+
 ---
 
 ## skill_access
