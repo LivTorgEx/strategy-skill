@@ -5,26 +5,12 @@ description: Design a LivTorgEx trading strategy and deploy it as a bot group. U
 
 # LivTorgEx — Create / Update Bot Group Strategy
 
-## Environment variables
-
-| Variable | Description |
-|----------|-------------|
-| `LIVTORGEX_MCP_URL` | Skill API base URL, e.g. `https://skill.api.livtorgex.com` |
-| `LIVTORGEX_MCP_TOKEN` | Personal access token (`lt_<...>`) — get from `/mcp/connect/authorize-url` |
-
----
-
 ## Workflow
 
 ### Step 1 — Fetch account context
 
-```bash
-curl -s "$LIVTORGEX_MCP_URL/mcp/account/api_keys" \
-  -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN"
-
-curl -s "$LIVTORGEX_MCP_URL/mcp/bot_groups" \
-  -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN"
-```
+Call MCP tool: `list_api_keys`
+Call MCP tool: `list_bot_groups`
 
 Present API keys by name. Warn if target bot group has `skill_access: "Read"` or `"Deny"`.
 
@@ -38,6 +24,10 @@ Construct a valid `BotGroupSetting`. For indicator details use `strategy-indicat
 
 ### Step 4 — Validate
 
+Call MCP tool: `validate_bot_group`
+Arguments: `{ "settings": <FULL_SETTINGS_JSON> }`
+
+
 ```bash
 curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/validate_bot_group" \
   -H "Content-Type: application/json" \
@@ -50,11 +40,19 @@ Fix all `errors`. `warnings` are non-blocking.
 
 ### Step 5 — Deploy
 
-```bash
-curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/bot_group" \
-  -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '<FULL_FORM_JSON>'
+Call MCP tool: `upsert_bot_group`
+Arguments:
+```json
+{
+  "name": "<BOT_GROUP_NAME>",
+  "api_key_id": <ID from list_api_keys>,
+  "margin_mode": "Isolated",
+  "margin_leverage": 20,
+  "margin": 500.0,
+  "max_active_bots": 5,
+  "symbols": [{ "symbol_key": "OKX#BTC-USDT-SWAP", "leverage": 20 }],
+  "settings": { <FULL_SETTINGS_JSON> }
+}
 ```
 
 `"created": true` = new group. `"created": false` = updated.
@@ -62,20 +60,19 @@ curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/bot_group" \
 ### Step 6 — Run backtest (optional feedback)
 
 After deploying, offer the user a backtest to validate the strategy on historical data.
-Ask for: `start_time` (e.g. 30 days ago), `end_time` (now or leave blank for open-ended).
+Ask for: `start_time` (Unix ms, e.g. 30 days ago), `end_time` (Unix ms, or omit for open-ended).
 
-```bash
-curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/bot_groups/<BOT_GROUP_ID>/run_backtest" \
-  -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "start_time": "2025-01-01 00:00:00",
-    "end_time": "2025-03-31 00:00:00"
-  }'
+Call MCP tool: `run_bot_group_backtest`
+Arguments:
+```json
+{
+  "bot_group_id": <ID from upsert_bot_group response>,
+  "start_time": 1740787200000,
+  "end_time": 1748563200000
+}
 ```
 
-The response contains `backtest_id` and `version_id`. The user can review the backtest run in the UI at:
-`/backtests/<backtest_id>/versions/<version_id>`
+The response contains `version_id`. The user can review the backtest in the UI.
 
 - Uses the bot group's **current** settings, symbols, margin, and leverage automatically.
 - A linked backtest container is created once per bot group and reused on subsequent calls.
@@ -85,7 +82,7 @@ The response contains `backtest_id` and `version_id`. The user can review the ba
 
 ## skill_access
 
-Each bot group has `skill_access`: `"Edit"` (can deploy), `"Read"` (list only), `"Deny"` (blocked). HTTP 403 → user must set it to `"Edit"` in **Account → Skill → Bot Group Access**.
+Each bot group has `skill_access`: `"Edit"` (can deploy), `"Read"` (list only), `"Deny"` (blocked). Error 403 → user must set it to `"Edit"` in **Account → Skill → Bot Group Access**.
 
 ---
 
