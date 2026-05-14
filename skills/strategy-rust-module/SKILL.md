@@ -130,11 +130,19 @@ ModulePlaceOrder {
 The project **must** be a valid Cargo workspace or single-crate project.
 The builder runs `cargo build --target wasm32-wasip1 --release` inside it.
 
-Create a `.tar.gz` of the project root (the directory containing `Cargo.toml`):
+> **`lte_strategy_bridge` must use a git dependency** — not a `path =` dependency.
+> The build server is isolated and has no access to the local workspace.
+> Declare it in `Cargo.toml` as:
+> ```toml
+> lte_strategy_bridge = { git = "https://github.com/LivTorgEx/lte_strategy_bridge.git", rev = "<commit-sha>" }
+> ```
+> Pin to the exact commit that matches the server's ABI version.
+
+Package the project root:
 
 ```bash
 # From the directory that contains Cargo.toml:
-tar -czf /tmp/module-src.tar.gz .
+tar --exclude=./target --exclude=./.git -czf /tmp/module-src.tar.gz .
 base64 -w 0 /tmp/module-src.tar.gz
 ```
 
@@ -335,11 +343,18 @@ To place or cancel limit orders within an open position, set:
 The project **must** be a valid Cargo workspace or single-crate project.
 The builder runs `cargo build --target wasm32-wasip1 --release` inside it.
 
-Create a `.tar.gz` of the project root (the directory containing `Cargo.toml`):
+> **`lte_strategy_bridge` must use a git dependency** — not a `path =` dependency.
+> The build server is isolated and has no access to the local workspace.
+> Declare it in `Cargo.toml` as:
+> ```toml
+> lte_strategy_bridge = { git = "https://github.com/LivTorgEx/lte_strategy_bridge.git", rev = "<commit-sha>" }
+> ```
+
+Package the project root:
 
 ```bash
 # From the directory that contains Cargo.toml:
-tar -czf /tmp/module-src.tar.gz .
+tar --exclude=./target --exclude=./.git -czf /tmp/module-src.tar.gz .
 ```
 
 Base64-encode for API submission:
@@ -623,16 +638,18 @@ ModulePlaceOrder {
 
 ### Step 4 — Submit source for server-side build
 
-Package the project as a `.tar.gz` (from the directory containing `Cargo.toml`) and
-submit it to the MCP build service. The server compiles `wasm32-wasip1` in a container
-— no local Rust toolchain required.
+Package the project as a `.tar.gz` and submit it to the MCP build service. The server
+compiles `wasm32-wasip1` in a container — no local Rust toolchain required.
+
+> **`lte_strategy_bridge` must use a git dependency** in `Cargo.toml` (not `path =`).
+> The build server has no access to the local workspace.
 
 ```bash
 MODULE_ID=$(jq -r .module_id module.manifest.json)
 VERSION=$(jq -r .version module.manifest.json)
 
 # Pack source (must stay under 1 MB compressed)
-tar -czf /tmp/module-src.tar.gz .
+tar --exclude=./target --exclude=./.git -czf /tmp/module-src.tar.gz .
 SOURCE_B64=$(base64 -w 0 /tmp/module-src.tar.gz)
 
 curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/modules/build" \
