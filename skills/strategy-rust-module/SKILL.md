@@ -77,6 +77,52 @@ To place or cancel limit orders within an open position, set:
 - `ModuleOutput.place_orders: Vec<ModulePlaceOrder>` — upserted by `mark`
 - `ModuleOutput.cancel_orders: Vec<String>` — marks to cancel
 
+#### `ModulePlaceOrder` — full field reference
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `direction` | `Direction` | — | `Long` or `Short` — which side's position this order belongs to |
+| `amount_ratio` | `f64` | — | Fraction of `max_open_amount` (0..1) |
+| `enter_price` | `f64` | — | Limit price for the order |
+| `take_profit` | `Option<f64>` | `None` | TP attached to this order |
+| `stop_loss` | `Option<f64>` | `None` | SL attached to this order |
+| `mark` | `String` | — | Stable unique identifier — used to upsert/cancel by the host |
+| `order_side` | `ModuleOrderSide` | `Buy` | Exchange order side: `Buy` for entries/DCA, `Sell` to reduce a Long, `Buy` to reduce a Short |
+| `reduce_only` | `bool` | `false` | When `true` the host applies the order only to an already-open position. **Never buffered** — silently dropped if no position is open. Use for all partial-close orders. |
+
+**`ModuleOrderSide` values:**
+```rust
+pub enum ModuleOrderSide {
+    Buy,  // default — entry / DCA orders
+    Sell, // reduce a Long position (or entry when direction = Short)
+}
+```
+
+**Partial-close (reduce-only) order pattern:**
+```rust
+use lte_strategy_bridge::abi::{ModulePlaceOrder, ModuleOrderSide, Direction};
+
+// Partial TP that sells a fraction of an open Long position:
+ModulePlaceOrder {
+    direction: Direction::Long,
+    amount_ratio: 0.25,          // close 25% of the position
+    enter_price: target_price,
+    take_profit: None,
+    stop_loss: None,
+    mark: "tp-partial-1".to_string(),
+    order_side: ModuleOrderSide::Sell,
+    reduce_only: true,           // REQUIRED for partial-close orders
+}
+```
+
+**IMPORTANT rules for `reduce_only`:**
+- Always set `reduce_only: true` on partial-close / partial-TP orders.
+- Never set it on entry or DCA orders (`reduce_only: false` or omit).
+- The host host will NOT buffer a `reduce_only` order if no matching position
+  is currently open — it logs a warning and skips it.
+- This ensures partial-close orders are direction-agnostic: the module declares
+  intent explicitly rather than relying on the host inferring it from the side.
+
 ---
 
 ### Step 3 — Package source
@@ -159,7 +205,7 @@ Set the `settings.strategy` block to:
 ## Re-deploying an updated module
 
 1. Fix the Rust source.
-2. Re-package and re-submit (Steps 3–4) with a **new version string** (e.g. `0.2.0`).
+2. Re-package and re-submit (Steps 4–5) with a **new version string** (e.g. `0.2.0`).
 3. Poll until `Success`.
 4. Update the bot group's `module_version` via `upsert_bot_group`.
 
@@ -175,6 +221,9 @@ Set the `settings.strategy` block to:
 - Build timeout: 240 seconds. If the build times out, status will be `Failed`
   with `build_output` = `"build timed out"`.
 - `build_output` is capped at 32 KB.
+- `create_module_repository` and `submit_module_build` are write-scoped tools.
+  The server admin must include them in `MCP_ALLOWED_WRITE_TOOLS` for them to
+  appear as enabled in the tool list.
 
 
 # LivTorgEx — Rust WASM Dynamic Module
@@ -526,46 +575,94 @@ To place or cancel limit orders within an open position, set:
 - `ModuleOutput.place_orders: Vec<ModulePlaceOrder>` — upserted by `mark`
 - `ModuleOutput.cancel_orders: Vec<String>` — marks to cancel
 
-### Step 4 — Build WASM
+#### `ModulePlaceOrder` — full field reference
 
-```bash
-rustup target add wasm32-wasip1
-cargo build --target wasm32-wasip1 --release
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `direction` | `Direction` | — | `Long` or `Short` — which side's position this order belongs to |
+| `amount_ratio` | `f64` | — | Fraction of `max_open_amount` (0..1) |
+| `enter_price` | `f64` | — | Limit price for the order |
+| `take_profit` | `Option<f64>` | `None` | TP attached to this order |
+| `stop_loss` | `Option<f64>` | `None` | SL attached to this order |
+| `mark` | `String` | — | Stable unique identifier — used to upsert/cancel by the host |
+| `order_side` | `ModuleOrderSide` | `Buy` | Exchange order side: `Buy` for entries/DCA, `Sell` to reduce a Long, `Buy` to reduce a Short |
+| `reduce_only` | `bool` | `false` | When `true` the host applies the order only to an already-open position. **Never buffered** — silently dropped if no position is open. Use for all partial-close orders. |
+
+**`ModuleOrderSide` values:**
+```rust
+pub enum ModuleOrderSide {
+    Buy,  // default — entry / DCA orders
+    Sell, // reduce a Long position (or entry when direction = Short)
+}
 ```
 
-Artifact: `target/wasm32-wasip1/release/module_entry.wasm`
+**Partial-close (reduce-only) order pattern:**
+```rust
+use lte_strategy_bridge::abi::{ModulePlaceOrder, ModuleOrderSide, Direction};
 
-### Step 5 — Upload via Skill API
+// Partial TP that sells a fraction of an open Long position:
+ModulePlaceOrder {
+    direction: Direction::Long,
+    amount_ratio: 0.25,          // close 25% of the position
+    enter_price: target_price,
+    take_profit: None,
+    stop_loss: None,
+    mark: "tp-partial-1".to_string(),
+    order_side: ModuleOrderSide::Sell,
+    reduce_only: true,           // REQUIRED for partial-close orders
+}
+```
 
-Read `module_id` and `version` from `module.manifest.json`, then upload:
+**IMPORTANT rules for `reduce_only`:**
+- Always set `reduce_only: true` on partial-close / partial-TP orders.
+- Never set it on entry or DCA orders (`reduce_only: false` or omit).
+- The host will NOT buffer a `reduce_only` order if no matching position
+  is currently open — it logs a warning and skips it.
+- This ensures partial-close orders are direction-agnostic: the module declares
+  intent explicitly rather than relying on the host inferring it from the side.
+
+### Step 4 — Submit source for server-side build
+
+Package the project as a `.tar.gz` (from the directory containing `Cargo.toml`) and
+submit it to the MCP build service. The server compiles `wasm32-wasip1` in a container
+— no local Rust toolchain required.
 
 ```bash
 MODULE_ID=$(jq -r .module_id module.manifest.json)
 VERSION=$(jq -r .version module.manifest.json)
 
-curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/modules/$MODULE_ID/$VERSION/upload" \
+# Pack source (must stay under 1 MB compressed)
+tar -czf /tmp/module-src.tar.gz .
+SOURCE_B64=$(base64 -w 0 /tmp/module-src.tar.gz)
+
+curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/modules/build" \
   -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN" \
-  -H "Content-Type: application/octet-stream" \
-  --data-binary @target/wasm32-wasip1/release/module_entry.wasm
+  -H "Content-Type: application/json" \
+  -d "{\"module_id\":\"$MODULE_ID\",\"module_version\":\"$VERSION\",\"source_tar_gz_base64\":\"$SOURCE_B64\"}"
 ```
 
-Success response:
+Returns `{ "build_id": "<UUID>", "status": "Pending" }`.
 
-```json
-{
-  "module_id": "<UUID>",
-  "module_version": "<version>",
-  "bucket": "strategy-modules",
-  "object_key": "modules/<UUID>/<version>/module.wasm",
-  "size_bytes": 12345
-}
+### Step 5 — Poll build status
+
+```bash
+curl -s "$LIVTORGEX_MCP_URL/mcp/modules/build/status?build_id=<BUILD_ID>" \
+  -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN"
 ```
 
-Constraints:
-- `module_id` must be a valid UUID.
-- `module_version` must be 1..64 chars, only `[A-Za-z0-9._-]`.
-- Max file size: 16 MiB.
-- HTTP 403 → `skill_access` for that module record is `"Deny"` or `"Read"`. User must set it to `"Edit"` in **Account → Skill → Module Access**.
+**Status values:** `Pending` → `Building` → `Success` / `Failed`.
+
+On `Failed`: read `build_output` for compiler errors, fix the source, re-package
+(Step 4) with a new version string.
+
+To see all builds for a module:
+
+```bash
+curl -s "$LIVTORGEX_MCP_URL/mcp/modules/build/history?module_id=$MODULE_ID" \
+  -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN"
+```
+
+Build timeout: 240 seconds. `build_output` is capped at 32 KB.
 
 ### Step 6 — Create or update bot group
 
