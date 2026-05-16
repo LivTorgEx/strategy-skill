@@ -258,6 +258,79 @@ A bot can open positions larger than its initial margin if it has accumulated **
 
 ---
 
+## signal_actions and on_actions — manual triggers
+
+There are two distinct layers of manual triggers, and both can be used together.
+
+### `signal_actions` — bot-group-level spawn trigger
+
+`signal_actions` are top-level buttons on the bot group. Each one creates (spawns) a **new bot** on the specified symbol when triggered. They are defined on the bot group directly (not inside `settings`):
+
+```json
+"signal_actions": [
+  { "code": "start", "name": "Start", "params": [] }
+]
+```
+
+Pass this in `upsert_bot_group` alongside `settings`. For the `signal` field to honour this, set `signal` to `Action` with the matching code:
+
+```json
+"signal": { "name": "Action", "code": "start" }
+```
+
+**Empty symbols:** When using signal actions you can leave `symbols: []` on the bot group. The token is provided by the caller at trigger time via `symbol_key` in `run_bot_group_action` — no need to pre-configure symbols.
+
+Trigger via `run_bot_group_action`:
+```json
+{ "bot_group_id": 20, "code": "start", "symbol_key": "OKX#BTC-USDT-SWAP", "price": 45000.0 }
+```
+
+### `on_actions` — per-bot in-position trigger
+
+`on_actions` are buttons on an **already-running bot**. They send an event into the strategy logic of that specific bot (e.g. force-enter a position, adjust TP, close). They live inside `settings.strategy`:
+
+**Pro strategy (`name: "Trading"`):**
+```json
+"strategy": {
+  "name": "Trading",
+  "professional": {
+    "on_actions": [
+      {
+        "name": "ForceEnter",
+        "params": [],
+        "actions": [
+          { "type": "Action", "filters": [], "action": { "type": "ForceStartPosition" } }
+        ]
+      }
+    ]
+  }
+}
+```
+When triggered, the `actions` array runs exactly like `on_analysis` actions — same filter + action syntax.
+
+**DynamicModule strategy (`name: "DynamicModule"`):**
+```json
+"strategy": {
+  "name": "DynamicModule",
+  "on_actions": [
+    { "name": "ForceEnter", "params": [], "actions": [] }
+  ]
+}
+```
+The WASM module receives a `ModuleEvent::Action { name: "ForceEnter" }` and handles it internally — `actions` is unused and should be `[]`.
+
+### Summary
+
+| | `signal_actions` | `on_actions` |
+|---|---|---|
+| Level | Bot group | Individual bot |
+| Effect | Spawns a new bot on the given symbol | Sends event to existing running bot |
+| Config location | Top-level `signal_actions` field on bot group | `settings.strategy.professional.on_actions` (Pro) or `settings.strategy.on_actions` (DynamicModule) |
+| Trigger tool | `run_bot_group_action` | UI per-bot action button (not via MCP) |
+| Symbol | Provided at call time — `symbols: []` is fine | Bot already knows its symbol |
+
+---
+
 ## Signal types
 
 The `signal` field defines the **trigger source** that causes the bot group to check `professional.filters` and potentially spawn a new bot. `Indicator` (candle-close timer) is the most common, but other sources react to external market events.
