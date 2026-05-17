@@ -5,11 +5,10 @@ description: LivTorgEx indicator reference. Use when building strategy filters o
 
 # LivTorgEx — Indicator Reference
 
-Call this endpoint to get all available indicators with their valid `type`, available `period` values, and `property` values. No query parameters.
+Call the MCP tool to get all available indicators with their valid `type`, available `period` values, and `property` values. No arguments needed.
 
 ```
-GET /mcp/indicators
-Authorization: Bearer <mcp-token>
+Call MCP tool: list_indicators
 ```
 
 ### Response schema

@@ -27,13 +27,6 @@ Construct a valid `BotGroupSetting`. For indicator details use `strategy-indicat
 Call MCP tool: `validate_bot_group`
 Arguments: `{ "settings": <FULL_SETTINGS_JSON> }`
 
-
-```bash
-curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/validate_bot_group" \
-  -H "Content-Type: application/json" \
-  -d '{ "settings": <FULL_SETTINGS_JSON> }'
-```
-
 Response: `{ "valid": true|false, "errors": [...], "warnings": [...] }`.
 
 Fix all `errors`. `warnings` are non-blocking.
