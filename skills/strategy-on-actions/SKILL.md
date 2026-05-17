@@ -267,20 +267,49 @@ Use `FireAlert` anywhere an action is allowed (`on_analysis`, `on_indicators`, `
 
 1. Is **persisted** to the user's notification table (visible in the bell feed).
 2. Is **broadcast over WebSocket** to connected clients in real time.
+3. Includes the **bot name** and **symbol** automatically in the notification.
 
+### `msg` format
+
+`msg` is an array of **message parts**. Each part is either static text or a dynamic value expression:
+
+| Part type | Fields | Description |
+|-----------|--------|-------------|
+| `Text`    | `value` (string) | Literal text appended to the message |
+| `Value`   | `value` (value expression), `precision` (optional int) | Resolves a value expression at runtime; `precision` controls decimal places for floats |
+
+**Simple example** (static text only):
 ```json
-{ "type": "FireAlert", "msg": "TP hit on BTC-USDT" }
+{ "type": "FireAlert", "msg": [{ "type": "Text", "value": "TP hit on BTC-USDT" }] }
 ```
 
+**Dynamic example** (text + value expressions):
+```json
+{
+  "type": "FireAlert",
+  "msg": [
+    { "type": "Text", "value": "PnL is " },
+    { "type": "Value", "value": { "type": "Position", "value": "Pnl" }, "precision": 2 },
+    { "type": "Text", "value": "$ at price " },
+    { "type": "Value", "value": { "type": "Global", "value": "Price" }, "precision": 4 }
+  ]
+}
+```
+
+This produces a notification like: `[MyBot] PnL is 12.34$ at price 68421.5000`
+
 **Rules:**
-- `msg` is required and must be a **non-empty string**. Empty or whitespace-only messages are silently ignored.
-- `msg` is a plain string — not a value expression. Keep it short and descriptive.
+- `msg` must contain at least one part. If the final composed message is empty or whitespace-only, the alert is silently ignored.
+- Any value expression type is supported (Global, Position, Variable, Math, Indicator, etc.).
+- If a `Value` part resolves to `None` (e.g. referencing a variable that doesn't exist), that segment is omitted.
+- `precision` only affects float values. Omit it or set to `null` to use default float formatting.
 - Use `filters` on the enclosing `Action` item to control when the alert fires.
+- **Backward compatibility:** `msg` as a plain string (e.g. `"msg": "some text"`) is still accepted by the backend and treated as a single `Text` part.
 
 **Common patterns:**
 
 ```json
-// Notify when a position's PnL crosses $200
+// Notify with current PnL when threshold is crossed
 {
   "type": "Action",
   "filters": [
@@ -288,16 +317,22 @@ Use `FireAlert` anywhere an action is allowed (`on_analysis`, `on_indicators`, `
       "left":  { "type": "Position", "side": { "type": "Direction", "value": "LONG" }, "value": "Pnl" },
       "right": { "type": "Number", "value": 200.0 } }
   ],
-  "action": { "type": "FireAlert", "msg": "PnL > $200 on LONG" }
+  "action": {
+    "type": "FireAlert",
+    "msg": [
+      { "type": "Text", "value": "LONG PnL crossed $200, now at " },
+      { "type": "Value", "value": { "type": "Position", "side": { "type": "Direction", "value": "LONG" }, "value": "Pnl" }, "precision": 2 },
+      { "type": "Text", "value": "$" }
+    ]
+  }
 }
 
-// Notify when the bot stops
+// Notify when the bot stops (simple text)
 {
   "type": "Action",
   "filters": [],
-  "action": { "type": "FireAlert", "msg": "Bot stopped" }
+  "action": { "type": "FireAlert", "msg": [{ "type": "Text", "value": "Bot stopped" }] }
 }
-// (add this as the first item in on_finished before ForceStopBot)
 ```
 
 > **Note:** `FireAlert` is fire-and-forget — it does not block subsequent actions or affect bot state. It can coexist with any other action in the same handler.
