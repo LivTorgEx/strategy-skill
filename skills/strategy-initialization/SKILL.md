@@ -1,6 +1,6 @@
 ---
 name: strategy-initialization
-description: LivTorgEx bot spawn initialization reference — enter_price, enter_direction, enter_amount, auto_max_amount_leverage, changes, and professional.filters. Use when configuring how and when a bot enters a position.
+description: LivTorgEx bot spawn initialization reference — enter_price, enter_direction, enter_amount, auto_max_amount_leverage (Auto Invest / PnL compounding), changes, and professional.filters. Use when configuring how and when a bot enters a position, including auto-invest / reinvest-profit setups.
 ---
 
 # LivTorgEx — Bot Initialization Reference
@@ -147,7 +147,9 @@ Defines the initial margin amount for the bot's first entry order. Currently onl
 
 ---
 
-## `auto_max_amount_leverage` — compound PnL multiplier
+## `auto_max_amount_leverage` — Auto Invest / compound PnL multiplier
+
+UI label: **Auto Invest** (also "Auto Max Amount Leverage"). Triggered when the user asks for "auto invest", "compounding", "reinvest profit", or "scaling the budget with PnL".
 
 An optional value that controls how much of a closed position's PnL is reinvested into `AutoMaxAmount` for the next position.
 
@@ -160,12 +162,14 @@ An optional value that controls how much of a closed position's PnL is reinveste
 AutoMaxAmount = AutoMaxAmount_prev + position_pnl × auto_max_amount_leverage
 ```
 
-When omitted: `AutoMaxAmount = max_open_amount + total_pnl` (default full compounding).
+When omitted: no compounding — every bot uses `max_open_amount` as-is.
+
+**Only values ≥ 1 are supported.** Zero and negative values are not valid — to disable compounding, omit the field entirely.
 
 | Value | Effect |
 |-------|--------|
-| `0.0` | PnL is never added — `AutoMaxAmount` stays at `max_open_amount` (no compounding) |
-| `1.0` | Full PnL reinvested (standard compounding) |
+| omitted | No compounding (recommended way to opt out) |
+| `1.0` | Full PnL reinvested (standard compounding, in-UI default when the field is enabled) |
 | `2.0` | Double PnL reinvested (aggressive compounding) |
 | `{ "type": "Number", "value": 8.0 }` | Example seen in multi-limit strategies with leverage |
 

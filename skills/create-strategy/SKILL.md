@@ -182,6 +182,11 @@ No daily. `min_tf` in signal definitions is in **minutes**.
       "enter_price":     { "type": "Force" },
       "enter_amount":    { "type": "Percentage", "source": "MaxAmount", "value": 100.0 },
       "enter_direction": { "type": "Default" },
+      /* Optional auto-invest / PnL compounding. Omit for no compounding (default).
+         Set "auto_max_amount_leverage": { "type": "Number", "value": 1.0 } to reinvest
+         100% of closed-position PnL into the next position's budget. See
+         `strategy-initialization` skill for the full formula and value types. */
+      "auto_max_amount_leverage": { "type": "Number", "value": 1.0 },
       "filters": [ /* search-mode gate — checked before starting a new bot; AND by default */ ],
       "take_profit": { "type": "NextOrder", "order": {
         "type":   "Market",
@@ -216,6 +221,24 @@ No daily. `min_tf` in signal definitions is in **minutes**.
 **`on_finished`** fires when a position closes — same item shape as `on_analysis`: `[{ "type": "Action", filters, action }]`.
 **`on_actions`** is for manual UI triggers only — omit unless explicitly required.
 `take_profit`/`stop_loss` orders require `"type": "Market"` on the inner `order` object.
+
+### `auto_max_amount_leverage` — Auto Invest / PnL compounding
+
+`auto_max_amount_leverage` (UI label: **Auto Invest** / "Auto Max Amount Leverage") is an optional Pro setting that auto-reinvests realised PnL into the next position's budget.
+
+```text
+AutoMaxAmount = AutoMaxAmount_prev + position_pnl × auto_max_amount_leverage
+```
+
+**Only values ≥ 1 are supported.** Zero and negative values are not valid — to disable compounding, simply omit the field.
+
+| Value | Effect |
+|-------|--------|
+| omitted | No compounding — every bot uses `max_open_amount` as-is |
+| `{ "type": "Number", "value": 1.0 }` | Full PnL reinvested (standard, also the in-UI default when the field is enabled) |
+| `{ "type": "Number", "value": 2.0 }` | Aggressive — 2× PnL reinvested |
+
+When the user asks for "auto invest", "compounding", "reinvest profit", or "scaling budget with PnL" → set this field. To size the bot's next entry from the compounded budget, reference `{ "type": "Global", "value": "AutoMaxAmount" }` in `enter_amount` or in a variable's default. Full reference: `strategy-initialization` skill.
 
 ### `enter_price` types
 
