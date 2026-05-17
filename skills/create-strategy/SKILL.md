@@ -33,6 +33,12 @@ Fix all `errors`. `warnings` are non-blocking.
 
 ### Step 5 — Deploy
 
+`upsert_bot_group` has **two modes**. Pick the right one based on whether the bot group already exists.
+
+#### 5a. CREATE-OR-UPDATE-BY-NAME (full payload)
+
+Use when creating a brand-new bot group, or when you want to fully replace an existing one's config. Send every required field; if a bot group with this `name` already exists for the caller, it is fully overwritten.
+
 Call MCP tool: `upsert_bot_group`
 Arguments:
 ```json
@@ -49,6 +55,55 @@ Arguments:
 ```
 
 `"created": true` = new group. `"created": false` = updated.
+
+#### 5b. PARTIAL UPDATE BY ID (GraphQL-style)
+
+Use when changing **only some fields** of an existing bot group. Pass `bot_group_id` and **only** the fields you want to modify. Every field you omit is preserved — including `symbols`, `name`, `api_key_id`, margins, etc.
+
+> **Safety:** updating `settings` alone via this mode will NOT touch the symbols list, margin, or any other field. This is the recommended way to tweak an existing strategy without risking accidental overwrites.
+
+**Rename only:**
+```json
+{ "bot_group_id": 19, "name": "MRC v2" }
+```
+
+**Change leverage only:**
+```json
+{ "bot_group_id": 19, "margin_leverage": 10 }
+```
+
+**Replace the whole `settings` JSON, keep everything else:**
+```json
+{ "bot_group_id": 19, "settings": { <FULL_SETTINGS_JSON> } }
+```
+
+**Patch sub-trees of `settings` without sending the full object** — use `settings_patches: [{path, value}, ...]`. Each entry REPLACES the sub-tree at `path` (dot notation; empty string = whole settings). Patches are applied over the bot group's existing settings and the merged result is re-validated automatically:
+```json
+{
+  "bot_group_id": 19,
+  "settings_patches": [
+    { "path": "strategy.professional.take_profit.order.price.price.value", "value":  5.0 },
+    { "path": "strategy.professional.stop_loss.order.price.price.value",  "value": -2.0 }
+  ]
+}
+```
+
+**Swap a whole sub-tree of `settings` in one shot:**
+```json
+{
+  "bot_group_id": 19,
+  "settings_patches": [
+    { "path": "strategy.professional", "value": { <NEW_PROFESSIONAL_BLOCK> } }
+  ]
+}
+```
+
+**Notes for partial UPDATE mode:**
+- `bot_group_id` must come from `list_bot_groups` or a prior `upsert_bot_group` response.
+- Validation still runs whenever `settings` or `settings_patches` is supplied — invalid merged settings are rejected with the standard `Bot schema wrong: <reason> at <path>` error.
+- Margin is auto-derived from `max_open_amount / margin_leverage` when settings change, unless you pass an explicit `margin`.
+- Works only on **personal** bot groups (not strategy- or worker-attached). Returns 404 otherwise.
+- `skill_access` must be `"Edit"` (same rule as before).
 
 ### Step 6 — Run backtest (optional feedback)
 
