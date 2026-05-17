@@ -236,15 +236,6 @@ Set the `settings.strategy` block to:
 
 # LivTorgEx — Rust WASM Dynamic Module
 
-## Environment variables
-
-| Variable | Description |
-|----------|-------------|
-| `LIVTORGEX_MCP_URL` | Skill API base URL, e.g. `http://localhost:8003` |
-| `LIVTORGEX_MCP_TOKEN` | Personal access token (`lt_<...>`) — get from `/mcp/connect/authorize-url` |
-
----
-
 ## Overview
 
 A DynamicModule strategy is a WASM binary compiled from Rust. The bridge
@@ -266,12 +257,9 @@ The full lifecycle is:
 
 ### Step 1 — Create a module repository
 
-```http
-POST /mcp/modules/create
-Authorization: Bearer $LIVTORGEX_MCP_TOKEN
-Content-Type: application/json
-
-{
+```
+Call MCP tool: create_module_repository
+Arguments: {
   "name": "<strategy-name>",
   "description": "Optional description"
 }
@@ -291,9 +279,8 @@ Response:
 Save `module_id` — it is the stable identifier for all future versions of this strategy.
 
 To list existing repositories:
-```http
-GET /mcp/modules
-Authorization: Bearer $LIVTORGEX_MCP_TOKEN
+```
+Call MCP tool: list_modules
 ```
 
 ---
@@ -369,12 +356,9 @@ large test fixtures or generated files before packaging.
 
 ### Step 4 — Submit a build
 
-```http
-POST /mcp/modules/build
-Authorization: Bearer $LIVTORGEX_MCP_TOKEN
-Content-Type: application/json
-
-{
+```
+Call MCP tool: submit_module_build
+Arguments: {
   "module_id": "<UUID from Step 1>",
   "module_version": "0.1.0",
   "source_tar_gz_base64": "<base64 string>"
@@ -397,9 +381,9 @@ Response:
 
 ### Step 5 — Poll build status
 
-```http
-GET /mcp/modules/build/status?build_id=<UUID>
-Authorization: Bearer $LIVTORGEX_MCP_TOKEN
+```
+Call MCP tool: get_module_build_status
+Arguments: { "build_id": "<UUID>" }
 ```
 
 Response:
@@ -431,9 +415,9 @@ Poll every 5–10 seconds until `status` is `Success` or `Failed`.
 re-package (Step 3), and submit a new build (Step 4) with the same or a new version.
 
 To see all builds for a module:
-```http
-GET /mcp/modules/build/history?module_id=<UUID>
-Authorization: Bearer $LIVTORGEX_MCP_TOKEN
+```
+Call MCP tool: list_module_builds
+Arguments: { "module_id": "<UUID>" }
 ```
 
 ---
@@ -454,13 +438,11 @@ Once the build status is `Success`, configure the bot group `strategy` block:
 
 `direction` options: `"BOTH"`, `"Long"`, `"Short"`.
 
-Deploy with the Skill API:
+Deploy with the MCP tool:
 
-```bash
-curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/bot_group" \
-  -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '<FULL_FORM_JSON>'
+```
+Call MCP tool: upsert_bot_group
+Arguments: <FULL_FORM_JSON>
 ```
 
 `"created": true` = new group. `"created": false` = updated.
@@ -490,15 +472,6 @@ curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/bot_group" \
 
 
 # LivTorgEx — Rust WASM Dynamic Module
-
-## Environment variables
-
-| Variable | Description |
-|----------|-------------|
-| `LIVTORGEX_MCP_URL` | Skill API base URL, e.g. `http://localhost:8003` |
-| `LIVTORGEX_MCP_TOKEN` | Personal access token (`lt_<...>`) — get from `/mcp/connect/authorize-url` |
-
----
 
 ## Overview
 
@@ -651,20 +624,26 @@ VERSION=$(jq -r .version module.manifest.json)
 # Pack source (must stay under 1 MB compressed)
 tar --exclude=./target --exclude=./.git -czf /tmp/module-src.tar.gz .
 SOURCE_B64=$(base64 -w 0 /tmp/module-src.tar.gz)
+```
 
-curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/modules/build" \
-  -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"module_id\":\"$MODULE_ID\",\"module_version\":\"$VERSION\",\"source_tar_gz_base64\":\"$SOURCE_B64\"}"
+Then submit via the MCP tool:
+
+```
+Call MCP tool: submit_module_build
+Arguments: {
+  "module_id": "$MODULE_ID",
+  "module_version": "$VERSION",
+  "source_tar_gz_base64": "$SOURCE_B64"
+}
 ```
 
 Returns `{ "build_id": "<UUID>", "status": "Pending" }`.
 
 ### Step 5 — Poll build status
 
-```bash
-curl -s "$LIVTORGEX_MCP_URL/mcp/modules/build/status?build_id=<BUILD_ID>" \
-  -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN"
+```
+Call MCP tool: get_module_build_status
+Arguments: { "build_id": "<BUILD_ID>" }
 ```
 
 **Status values:** `Pending` → `Building` → `Success` / `Failed`.
@@ -674,9 +653,9 @@ On `Failed`: read `build_output` for compiler errors, fix the source, re-package
 
 To see all builds for a module:
 
-```bash
-curl -s "$LIVTORGEX_MCP_URL/mcp/modules/build/history?module_id=$MODULE_ID" \
-  -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN"
+```
+Call MCP tool: list_module_builds
+Arguments: { "module_id": "$MODULE_ID" }
 ```
 
 Build timeout: 240 seconds. `build_output` is capped at 32 KB.
@@ -700,13 +679,11 @@ Bot group `strategy` block:
 
 `direction` options: `"BOTH"`, `"Long"`, `"Short"`.
 
-Deploy with the Skill API (same as settings-based strategy):
+Deploy with the MCP tool (same as settings-based strategy):
 
-```bash
-curl -s -X POST "$LIVTORGEX_MCP_URL/mcp/bot_group" \
-  -H "Authorization: Bearer $LIVTORGEX_MCP_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '<FULL_FORM_JSON>'
+```
+Call MCP tool: upsert_bot_group
+Arguments: <FULL_FORM_JSON>
 ```
 
 `"created": true` = new group. `"created": false` = updated.
