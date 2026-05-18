@@ -228,6 +228,38 @@ Each module record has `skill_access`: `"Edit"` (can upload), `"Read"` (list onl
 
 ---
 
+## Bot Context & Crash Recovery
+
+The bridge persists module state to the **bot context** in the database (throttled to every ~80 seconds). This serves two purposes:
+
+1. **Crash recovery**: On server restart, the saved `state` is passed back to the module via `ModuleInput.state` on the first event. The module can restore its in-memory state from this.
+2. **User visibility**: The bot context is visible in the UI, allowing the user to trace strategy decisions in real time. The context includes `realised_pnl`, `auto_max_amount`, the last `debug` message, and the module's `state`.
+
+**To enable crash recovery**, set `ModuleOutput.state` with a JSON-serializable snapshot of your strategy state. The module should check `input.state` on startup and restore from it:
+
+```rust
+fn run(input: &ModuleInput, state: &mut State) -> ModuleOutput {
+    if let Some(saved) = &input.state {
+        if let Ok(restored) = serde_json::from_value::<State>(saved.clone()) {
+            *state = restored;
+        }
+    }
+    // ... strategy logic ...
+    ModuleOutput {
+        state: Some(serde_json::to_value(&state).unwrap()),
+        debug: format!("summary of what the strategy is doing"),
+        ..Default::default()
+    }
+}
+```
+
+**Key points:**
+- `input.state` is only non-`None` on the first event after a restart — use in-memory state for normal operation.
+- `output.state` is written to DB every ~80s — keep it small (avoid large arrays or history buffers).
+- `output.debug` is saved in the bot context for user tracing — put human-readable strategy status here.
+
+---
+
 # ABI Reference — `lte_strategy_bridge`
 
 All types below are from the `lte_strategy_bridge` crate. This is the complete
@@ -262,7 +294,7 @@ Passed to the WASM module via stdin on every tick.
 | `indicators` | `BTreeMap<i64, Vec<HashMap<String, HashMap<String, ModuleIndicatorValue>>>>` | Indicator data keyed by timeframe in seconds. See **Indicator Access** below |
 | `positions` | `ModulePositions` | Current open positions summary |
 | `sug_info` | `Option<SuggestionInfo>` | Real-time projection/suggestion data (present on `SugInfo` events) |
-| `state` | `Option<serde_json::Value>` | Opaque state from previous event's `ModuleOutput.state`. Optional — prefer in-memory Rust state |
+| `state` | `Option<serde_json::Value>` | On first event after restart: restored from DB (last persisted `ModuleOutput.state`). Otherwise `None` — use in-memory Rust state for normal operation |
 
 ---
 
@@ -335,8 +367,8 @@ Written to stdout as a single JSON line. The bridge reads this to execute tradin
 | `place_orders` | `Vec<ModulePlaceOrder>` | `[]` | Standing limit orders to create or update (matched by `mark`) |
 | `cancel_orders` | `Vec<String>` | `[]` | Marks of standing limit orders to cancel |
 | `stop_bot` | `bool` | `false` | Set `true` to stop the bot after this tick |
-| `state` | `Option<serde_json::Value>` | `None` | Opaque state passed back on the next tick's `ModuleInput.state` |
-| `debug` | `String` | `""` | Debug message (logged by the bridge, visible in bot logs) |
+| `state` | `Option<serde_json::Value>` | `None` | Opaque state — **persisted to bot context** in DB (every ~80s) and restored on restart via `ModuleInput.state`. Also visible to the user in the UI |
+| `debug` | `String` | `""` | Debug message — logged at INFO level and saved in bot context (visible to user for tracing) |
 | `error` | `String` | `""` | Error message — logged at ERROR level by the bridge. `run_loop` populates this automatically for parse errors and handler panics |
 
 ---
