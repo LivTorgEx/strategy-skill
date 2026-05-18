@@ -10,14 +10,20 @@ description: >
 
 ## Overview
 
-A DynamicModule strategy is a WASM binary compiled from Rust. The bridge
-re-executes it on every tick, passing `ModuleInput` via stdin and reading
-`ModuleOutput` from stdout. Persistent state is threaded through the `state`
-field in both structs.
+A DynamicModule strategy is a WASM binary compiled from Rust. The platform
+spawns a **persistent WASM instance** at bot startup — the module runs a
+stdin/stdout loop (`lte_strategy_bridge::run_loop`) and stays alive for the
+bot's entire lifetime. The bridge feeds events as JSON lines to stdin and reads
+responses from stdout. State lives in the module's memory (plain Rust variables)
+— no serialization round-trip needed.
+
+Each bot runs as a **tokio task** (green thread), not an OS thread — this scales
+to 10k+ bots on a single machine. Between events the module yields to the
+runtime (zero CPU while idle).
 
 The full lifecycle is:
 1. Create a **module repository** (gets a `module_id` UUID).
-2. Write Rust strategy code.
+2. Write Rust strategy code using `lte_strategy_bridge::run_loop`.
 3. Package source as a `.tar.gz`.
 4. **Get a presigned upload URL** and **upload the archive to S3**.
 5. **Submit a build** — the server validates the upload and queues compilation.
@@ -46,27 +52,27 @@ Write a Rust binary crate. The scaffold lives at
 `strategy-skill/solutions/strategy-rust-module/scaffold/`.
 
 Key contract for `src/main.rs`:
-- Read `ModuleInput` from stdin (`serde_json`).
-- Write exactly one `ModuleOutput` JSON line to stdout.
-- Do **not** call `std::process::exit` — return from `main` normally.
-- Persist cross-tick state in `ModuleOutput.state`; load from `ModuleInput.state`.
+- Use `lte_strategy_bridge::run_loop` — it handles stdin/stdout framing, JSON parsing, panic recovery, and error reporting.
+- Your handler receives a typed `ModuleInput` and returns a `ModuleOutput`.
+- Do **not** call `std::process::exit` — the module must keep running. If it exits, the bridge logs an error and all subsequent events fail.
+- State lives in-memory as plain Rust variables — no serialization needed.
 
 ```rust
-use std::io::{self, Read};
-use lte_strategy_bridge::abi::{ModuleInput, ModuleOutput, ModuleOpenPosition};
+use lte_strategy_bridge::{ModuleInput, ModuleOutput};
+
+#[derive(Default)]
+struct State {
+    // your strategy state here — survives across all events
+}
 
 fn main() {
-    let mut raw = String::new();
-    io::stdin().read_to_string(&mut raw).unwrap_or_default();
-    let input: ModuleInput = serde_json::from_str(&raw).unwrap_or_default();
+    let mut state = State::default();
+    lte_strategy_bridge::run_loop(|input| run(&input, &mut state));
+}
 
+fn run(input: &ModuleInput, state: &mut State) -> ModuleOutput {
     // --- strategy logic here ---
-
-    let out = ModuleOutput {
-        open_positions: vec![],
-        ..Default::default()
-    };
-    println!("{}", serde_json::to_string(&out).unwrap());
+    ModuleOutput::default()
 }
 ```
 
@@ -204,8 +210,12 @@ Each module record has `skill_access`: `"Edit"` (can upload), `"Read"` (list onl
 
 ## Notes
 
-- The bridge loads the WASM binary from S3/MinIO once at bot startup. To pick up
-  a new binary, restart the affected bots (stop + start via the UI or worker).
+- The bridge loads the WASM binary from S3/MinIO once at bot startup and spawns a
+  persistent instance. To pick up a new binary, restart the affected bots
+  (stop + start via the UI or worker).
+- The module **must run a persistent stdin loop** (via `lte_strategy_bridge::run_loop`).
+  If `_start` returns or the module calls `process::exit`, the bridge logs an error
+  and all subsequent events for that bot will fail.
 - Use a stable `mark` string per logical entry (e.g. `"long-dca-t2"`) so the bridge
   can upsert/cancel orders idempotently.
 - Keep `module_version` pinned in production; use `"latest"` only during development.
@@ -252,7 +262,7 @@ Passed to the WASM module via stdin on every tick.
 | `indicators` | `BTreeMap<i64, Vec<HashMap<String, HashMap<String, ModuleIndicatorValue>>>>` | Indicator data keyed by timeframe in seconds. See **Indicator Access** below |
 | `positions` | `ModulePositions` | Current open positions summary |
 | `sug_info` | `Option<SuggestionInfo>` | Real-time projection/suggestion data (present on `SugInfo` events) |
-| `state` | `Option<serde_json::Value>` | Opaque state from previous tick's `ModuleOutput.state` |
+| `state` | `Option<serde_json::Value>` | Opaque state from previous event's `ModuleOutput.state`. Optional — prefer in-memory Rust state |
 
 ---
 
@@ -262,7 +272,7 @@ Discriminated union (serde `snake_case` tag). Tells the module what triggered th
 
 | Variant | Fields | Description |
 |---------|--------|-------------|
-| `sug_info` | *(none)* | Real-time projection data arrived. `input.sug_info` is populated |
+| `sug_info` | *(none)* | Trade-driven real-time update (~1s when trades are active, variable rate). `input.sug_info` is populated |
 | `indicators` | `timeframes: Vec<i64>` | Indicator candles updated for the listed timeframe(s) |
 | `signal` | *(none)* | Signal event |
 | `new_position` | `direction: Direction, entry_price: f64, qty: f64` | A position was opened on the exchange |
@@ -327,6 +337,7 @@ Written to stdout as a single JSON line. The bridge reads this to execute tradin
 | `stop_bot` | `bool` | `false` | Set `true` to stop the bot after this tick |
 | `state` | `Option<serde_json::Value>` | `None` | Opaque state passed back on the next tick's `ModuleInput.state` |
 | `debug` | `String` | `""` | Debug message (logged by the bridge, visible in bot logs) |
+| `error` | `String` | `""` | Error message — logged at ERROR level by the bridge. `run_loop` populates this automatically for parse errors and handler panics |
 
 ---
 
@@ -429,8 +440,15 @@ ModulePlaceOrder {
 
 Present in `ModuleInput.sug_info` when `event` is `sug_info`.
 
-Executed on around 1 second intervals, this is the main data feed for real-time projections and trading suggestions. The host populates it with the latest market data, indicator values,
-and projection/suggestion information from the projection engine. Use it to implement real-time reactive strategies that respond to market conditions. The `status` field indicates whether the projection engine suggests normal trading conditions or a fast-trade opportunity when number of trades per 3 second (ntps) exceeds a certain threshold.
+**`sug_info` is NOT a fixed-interval tick** — it is driven by real trades arriving from the exchange. The projection engine (`worker_projection`) receives trades via gRPC, updates candle aggregation and NTPS counters, and emits a `SuggestionInfo` message via gRPC approximately every **~1 second** — but only when at least one trade has arrived. **If no trades arrive from the exchange, no `sug_info` is emitted** and the module simply waits.
+
+**NTPS and FastTrade mode:**
+- **NTPS** (Number of Trades Per 3 Seconds) measures real-time trading activity — the average number of exchange trades in a rolling 3-second window.
+- When NTPS exceeds a threshold, the projection enables **FastTrade** status (`status: "FastTrade"`), increasing `sug_info` emission frequency for more responsive trading.
+- During **Normal** status, updates arrive roughly once per second.
+- During **low activity** (few or no trades), updates are less frequent — the system waits for the next trade.
+
+This makes `sug_info` your primary real-time data feed for reactive strategies. The variable rate means your module receives more events during volatile markets and fewer during quiet periods — naturally matching market activity.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -523,11 +541,15 @@ pub enum AlgoSuggestionTradeStatus { Normal, FastTrade }
 
 ## Indicator Access
 
+Indicator events fire **when a candle closes** on one or more timeframes — this is event-driven from the projection engine, not polled. The projection detects a candle close (e.g. the 1-minute candle at 14:01:00), computes all configured indicators, and broadcasts the results. The bridge reads the latest snapshots from `GlobalStorage` (shared in-memory store that keeps a rolling window of **10 candles** per timeframe) and includes them in every `ModuleInput`.
+
 Indicators are delivered in `ModuleInput.indicators` as a nested map:
 `BTreeMap<timeframe_seconds, Vec<candle_map>>` where each `candle_map` is
 `HashMap<indicator_name, HashMap<field_name, ModuleIndicatorValue>>`.
 
-The first element (`[0]`) is always the most recent candle.
+The first element (`[0]`) is always the most recent candle. Up to 10 historical candles are available per timeframe, allowing lookback-based logic without maintaining your own candle history.
+
+When `event` is `{"indicators": {"timeframes": [60, 300]}}`, the `timeframes` array tells you which timeframes just had a candle close. Note: indicators are also present on `sug_info` events (the latest cached values), so your module always has access to the most recent indicator data regardless of event type.
 
 ### ModuleIndicatorValue
 
