@@ -18,10 +18,11 @@ field in both structs.
 The full lifecycle is:
 1. Create a **module repository** (gets a `module_id` UUID).
 2. Write Rust strategy code.
-3. Package source as a `.tar.gz`, base64-encode it.
-4. **Submit a build** — the builder server compiles `wasm32-wasip1` in a container.
-5. **Poll for build status** — on failure, read `build_output` compiler errors, fix, and re-submit.
-6. On success, deploy the module version to a bot group.
+3. Package source as a `.tar.gz`.
+4. **Get a presigned upload URL** and **upload the archive to S3**.
+5. **Submit a build** — the server validates the upload and queues compilation.
+6. **Poll for build status** — on failure, read `build_output` compiler errors, fix, and re-submit.
+7. On success, deploy the module version to a bot group.
 
 ---
 
@@ -91,7 +92,6 @@ Package the project root:
 ```bash
 # From the directory that contains Cargo.toml:
 tar --exclude=./target --exclude=./.git -czf /tmp/module-src.tar.gz .
-base64 -w 0 /tmp/module-src.tar.gz
 ```
 
 Keep the source under **1 MB** (compressed). Remove large test fixtures or generated
@@ -99,23 +99,50 @@ files if the source exceeds this limit.
 
 ---
 
-### Step 4 — Submit a build
+### Step 4 — Upload source via presigned URL
+
+**4a.** Get a presigned upload URL:
+
+Call MCP tool: `get_module_upload_url`
+Arguments:
+```json
+{
+  "module_id": "<UUID from Step 1>",
+  "module_version": "0.1.0"
+}
+```
+
+Returns `upload_url` (valid for 5 minutes) and `expires_in`.
+
+**4b.** Upload the archive directly to S3:
+
+```bash
+curl -X PUT -T /tmp/module-src.tar.gz "$UPLOAD_URL"
+```
+
+The binary goes directly from disk to S3 — no base64 encoding, no JSON serialization.
+
+---
+
+### Step 5 — Submit the build
 
 Call MCP tool: `submit_module_build`
 Arguments:
 ```json
 {
   "module_id": "<UUID from Step 1>",
-  "module_version": "0.1.0",
-  "source_tar_gz_base64": "<base64 string from Step 3>"
+  "module_version": "0.1.0"
 }
 ```
 
-Returns `build_id`. `module_version` constraints: 1–64 chars, only `[A-Za-z0-9._-]`.
+The server validates the uploaded archive (size, tar.gz integrity, Cargo.toml presence),
+then queues the build. Returns `build_id`.
+
+`module_version` constraints: 1–64 chars, only `[A-Za-z0-9._-]`.
 
 ---
 
-### Step 5 — Poll build status
+### Step 6 — Poll build status
 
 Call MCP tool: `get_module_build_status`
 Arguments: `{ "build_id": "<UUID>" }`
@@ -131,7 +158,7 @@ Arguments: `{ "build_id": "<UUID>" }`
 Poll every 5–10 seconds until `status` is `Success` or `Failed`.
 
 **On `Failed`:** read `build_output` for compiler errors, fix the Rust source,
-re-package (Step 3), and submit a new build (Step 4) with the same or a new version.
+re-package (Step 3), re-upload (Step 4), and submit a new build (Step 5) with the same or a new version.
 
 To see all builds for a module:
 Call MCP tool: `list_module_builds`
@@ -139,7 +166,7 @@ Arguments: `{ "module_id": "<UUID>" }`
 
 ---
 
-### Step 6 — Deploy to a bot group
+### Step 7 — Deploy to a bot group
 
 Once build status is `Success`, use `upsert_bot_group` (see `create-strategy` skill).
 Set the `settings.strategy` block to:
@@ -161,7 +188,7 @@ Set the `settings.strategy` block to:
 ## Re-deploying an updated module
 
 1. Fix the Rust source.
-2. Re-package and re-submit (Steps 3–5) with a **new version string** (e.g. `0.2.0`).
+2. Re-package, re-upload, and re-submit (Steps 3–5) with a **new version string** (e.g. `0.2.0`).
 3. Poll until `Success`.
 4. Update the bot group's `module_version` via `upsert_bot_group`.
 
@@ -185,7 +212,7 @@ Each module record has `skill_access`: `"Edit"` (can upload), `"Read"` (list onl
 - Build timeout: 240 seconds. If the build times out, status will be `Failed`
   with `build_output` = `"build timed out"`.
 - `build_output` is capped at 32 KB.
-- `create_module_repository` and `submit_module_build` are write-scoped tools.
+- `create_module_repository`, `get_module_upload_url`, and `submit_module_build` are write-scoped tools.
   The server admin must include them in `MCP_ALLOWED_WRITE_TOOLS` for them to
   appear as enabled in the tool list.
 
