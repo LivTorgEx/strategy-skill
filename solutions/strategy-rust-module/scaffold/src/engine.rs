@@ -6,16 +6,8 @@ use crate::state::State;
 
 // ── Position sizing ──────────────────────────────────────────────────────────
 
-/// 50 % of `max_open_amount` for the initial limit entry.
-#[allow(dead_code)]
-const ENTRY_RATIO: f64 = 0.5;
-
-/// First DCA level — 25 % at 0.5 % from entry.
-const DCA1_RATIO: f64 = 0.25;
+/// DCA price offsets from entry.
 const DCA1_OFFSET: f64 = 0.005; // 0.5 %
-
-/// Second DCA level — 25 % at 1.0 % from entry.
-const DCA2_RATIO: f64 = 0.25;
 const DCA2_OFFSET: f64 = 0.010; // 1.0 %
 
 // ── Risk / reward ────────────────────────────────────────────────────────────
@@ -85,8 +77,9 @@ pub fn run(input: &ModuleInput, state: &mut State) -> ModuleOutput {
                 //
                 // opens.push(ModuleOpenPosition {
                 //     direction: Direction::Long,
-                //     amount_ratio: ENTRY_RATIO,
-                //     enter_price: Some(input.price),   // limit price
+                //     amount: Some(input.max_amount * 0.5),
+                //     qty: None,
+                //     enter_price: Some(input.price),
                 //     order_type: "Limit".to_string(),
                 //     take_profit: Some(TAKE_PROFIT_PCT),
                 //     stop_loss: Some(STOP_LOSS_PCT),
@@ -101,8 +94,9 @@ pub fn run(input: &ModuleInput, state: &mut State) -> ModuleOutput {
                 //
                 // opens.push(ModuleOpenPosition {
                 //     direction: Direction::Short,
-                //     amount_ratio: ENTRY_RATIO,
-                //     enter_price: Some(input.price),   // limit price
+                //     amount: Some(input.max_amount * 0.5),
+                //     qty: None,
+                //     enter_price: Some(input.price),
                 //     order_type: "Limit".to_string(),
                 //     take_profit: Some(TAKE_PROFIT_PCT),
                 //     stop_loss: Some(STOP_LOSS_PCT),
@@ -147,19 +141,25 @@ fn build_dca_orders(direction: Direction, entry_price: f64) -> Vec<ModulePlaceOr
     vec![
         ModulePlaceOrder {
             direction,
-            amount_ratio: DCA1_RATIO,
+            amount: Some(125.0),
+            qty: None,
             enter_price: dca1_price,
             take_profit: None,
             stop_loss: None,
             mark: dca1_mark.to_string(),
+            order_side: Default::default(),
+            reduce_only: false,
         },
         ModulePlaceOrder {
             direction,
-            amount_ratio: DCA2_RATIO,
+            amount: Some(125.0),
+            qty: None,
             enter_price: dca2_price,
             take_profit: None,
             stop_loss: None,
             mark: dca2_mark.to_string(),
+            order_side: Default::default(),
+            reduce_only: false,
         },
     ]
 }
