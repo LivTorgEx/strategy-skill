@@ -183,11 +183,13 @@ Set the `settings.strategy` block to:
   "module_id": "<UUID>",
   "module_version": "0.1.0",
   "max_open_amount": 500.0,
+  "reinvest_percent": 1.0,
   "direction": "BOTH"
 }
 ```
 
 `direction` options: `"BOTH"`, `"Long"`, `"Short"`.
+`reinvest_percent`: fraction of realised profit to reinvest (0.0–1.0, default 1.0). See **Auto-Reinvest**.
 
 ---
 
@@ -260,6 +262,93 @@ fn run(input: &ModuleInput, state: &mut State) -> ModuleOutput {
 
 ---
 
+## Alerts
+
+The module can emit alert notifications to the user by returning `ModuleAlert` structs in `ModuleOutput.alerts`. Each alert is delivered as a bot notification through the same channel as Pro strategy alerts (push notifications, Telegram, etc.).
+
+Use alerts for important strategy events the user should be aware of — signal triggers, risk warnings, position milestones, etc.
+
+### ModuleAlert
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `message` | `String` | Alert text delivered to the user |
+
+```rust
+use lte_strategy_bridge::ModuleAlert;
+
+fn run(input: &ModuleInput, state: &mut State) -> ModuleOutput {
+    let mut alerts = Vec::new();
+
+    if state.detected_reversal {
+        alerts.push(ModuleAlert {
+            message: format!("Trend reversal detected at {:.2}", input.price),
+        });
+    }
+
+    if state.drawdown_pct > 5.0 {
+        alerts.push(ModuleAlert {
+            message: format!("Drawdown warning: {:.1}%", state.drawdown_pct),
+        });
+    }
+
+    ModuleOutput {
+        alerts,
+        ..Default::default()
+    }
+}
+```
+
+**Key points:**
+- Each `ModuleAlert` becomes a separate notification.
+- Alerts are drained after each tick — duplicates are not suppressed, so guard emission in your logic.
+- The notification includes the bot name and symbol automatically.
+
+---
+
+## Auto-Reinvest
+
+The platform automatically reinvests realised profit into position sizing. When a position closes, the net PnL (profit minus fees) is accumulated and used to increase the effective max position budget (`auto_max_amount`).
+
+**Formula:**
+```
+auto_max_amount = max_open_amount + realised_pnl * reinvest_percent * leverage
+```
+
+- `max_open_amount` — initial position size from bot group settings (the base budget).
+- `realised_pnl` — cumulative net profit (after fees) across all closed positions in this bot run.
+- `reinvest_percent` — fraction of profit to reinvest (0.0–1.0). Default: `1.0` (100%).
+- `leverage` — exchange leverage set on the bot group.
+
+**Example:** With `max_open_amount = 500`, `reinvest_percent = 1.0`, `leverage = 100`, and $2 net profit earned so far:
+```
+auto_max_amount = 500 + 2 * 1.0 * 100 = 700
+```
+The bot can now open positions up to $700 notional instead of the original $500.
+
+**Bot group settings:**
+```json
+{
+  "name": "DynamicModule",
+  "module_id": "<UUID>",
+  "module_version": "0.1.0",
+  "max_open_amount": 500.0,
+  "reinvest_percent": 1.0,
+  "direction": "BOTH"
+}
+```
+
+Set `reinvest_percent` to `0.0` to disable compounding entirely — `auto_max_amount` will always equal `max_open_amount`.
+
+**Key points:**
+- `auto_max_amount` is passed to the WASM module in every `ModuleInput` — the module can use it for sizing decisions.
+- `max_open_amount` is the base guard; `auto_max_amount` only grows above it when profit is positive.
+- Realised PnL is net of trading fees (matching Pro strategy behavior).
+- The value is persisted to bot context and restored on restart — profit accumulation survives server restarts.
+- If cumulative PnL goes negative, `auto_max_amount` drops below `max_open_amount` — the system uses whichever is larger as the effective cap.
+
+---
+
 # ABI Reference — `lte_strategy_bridge`
 
 All types below are from the `lte_strategy_bridge` crate. This is the complete
@@ -288,7 +377,7 @@ Passed to the WASM module via stdin on every tick.
 | `price` | `f64` | Current market price |
 | `symbol` | `String` | Trading pair (e.g. `"BTC-USDT-SWAP"`) |
 | `max_amount` | `f64` | Base max position size in USD (from bot group settings) |
-| `auto_max_amount` | `f64` | Effective max after compounding: `max_amount + realised_pnl * auto_max_amount_leverage`. Falls back to `max_amount` when no PnL accumulated |
+| `auto_max_amount` | `f64` | Effective max after auto-reinvest compounding: `max_amount + realised_pnl * reinvest_percent * leverage`. Falls back to `max_amount` when no PnL accumulated. See **Auto-Reinvest** below |
 | `leverage` | `i32` | Exchange leverage |
 | `symbol_info` | `ModuleSymbolInfo` | Trading rules for the symbol (tick size, lot size, minimums) |
 | `indicators` | `BTreeMap<i64, Vec<HashMap<String, HashMap<String, ModuleIndicatorValue>>>>` | Indicator data keyed by timeframe in seconds. See **Indicator Access** below |
@@ -366,6 +455,7 @@ Written to stdout as a single JSON line. The bridge reads this to execute tradin
 | `update_positions` | `Vec<ModuleUpdatePosition>` | `[]` | Amend fields of existing positions (no cancel+replace) |
 | `place_orders` | `Vec<ModulePlaceOrder>` | `[]` | Standing limit orders to create or update (matched by `mark`) |
 | `cancel_orders` | `Vec<String>` | `[]` | Marks of standing limit orders to cancel |
+| `alerts` | `Vec<ModuleAlert>` | `[]` | Alert notifications sent to the user (push/Telegram). See **Alerts** below |
 | `stop_bot` | `bool` | `false` | Set `true` to stop the bot after this tick |
 | `state` | `Option<serde_json::Value>` | `None` | Opaque state — **persisted to bot context** in DB (every ~80s) and restored on restart via `ModuleInput.state`. Also visible to the user in the UI |
 | `debug` | `String` | `""` | Debug message — logged at INFO level and saved in bot context (visible to user for tracing) |
