@@ -1,547 +1,417 @@
 ---
 name: strategy-on-actions
-description: LivTorgEx event handler reference — on_analysis, on_indicators, on_actions. Explains when to use each and how variables work for storing strategy state.
+description: LivTorgEx event handler and action reference — on_analysis, on_indicators, on_created, on_finished, on_actions, variables, and the complete action type reference (ForceStartPosition, CreateOrder, FireAlert, Break, etc.).
 ---
 
-# LivTorgEx — Event Handlers Reference
+# LivTorgEx — Event Handlers, Variables & Actions
 
-## Structure
+---
 
-`on_analysis`, `on_indicators`, and `on_actions` are **separate top-level arrays** inside `professional` — not wrapped in a single `on_actions` array.
+## 1. Handler structure
+
+`professional` has five event handler arrays and a `variables` array:
 
 ```json
 "professional": {
-  "variables": [],
+  "variables":     [ { "type": "Variable", "key": "k", "name": "Label", "default": {} } ],
   "on_analysis":   [ { "type": "Action", "filters": [], "action": {} } ],
   "on_created":    [ { "type": "Action", "filters": [], "action": {} } ],
   "on_indicators": [ { "timeframe": 300, "filters": [], "actions": [ { "type": "Action", "filters": [], "action": {} } ] } ],
   "on_finished":   [ { "type": "Action", "filters": [], "action": {} } ],
-  "on_actions":    [ { "name": "manual_close", "params": [], "actions": [] } ]
+  "on_actions":    [ { "name": "trigger_name", "params": [], "actions": [ { "type": "Action", "filters": [], "action": {} } ] } ]
 }
 ```
 
-**IMPORTANT:** Every item in `on_analysis`, `on_created`, `on_finished`, and `on_indicators[].actions` **must** include `"type": "Action"` as the first field.
+**Every item in `on_analysis`, `on_created`, `on_finished`, and `on_indicators[].actions` must include `"type": "Action"`.**
 
 ---
 
-## What is a bot?
+## 2. Bot lifecycle
 
-A **bot** is an instance of real-time market monitoring created by the bot group. It is NOT just a position — a bot can:
+A **bot** is a real-time market monitor — not just a position. It can watch the market, open/close positions, track variables, and stop itself.
 
-- **Monitor the market** with no open position — updating variables, watching conditions
-- **Start a position** via `ForceStartPosition` (explicitly in actions, or automatically via `enter_price: Force`)
-- **Stop a position** via `ForceStopPosition`
-- **Stop itself** via `ForceStopBot` (exits the bot entirely, even with no position)
-
-Bot states: `waiting` (no position) → `active` (has position) → `finished` (position closed). `on_finished` fires on position close.
-
-### `max_active_bots` and margin
-
-`max_active_bots` limits how many bots exist simultaneously. This caps total capital deployment:
-
-> `margin = 5.0`, `max_active_bots = 3` → max simultaneous exposure = **$15**
-
-A bot can open positions larger than its initial margin if it has accumulated **live (unrealised) profit** during its lifetime — that profit can be used as extra margin while the bot is running.
+**Spawn flow:**
+1. On each indicator candle close (controlled by `signal.min_tf`), the bot group evaluates `professional.filters`. If all pass → spawns a new bot (subject to `max_active_bots`).
+2. `enter_price` determines what happens next:
+   - `Force` — opens a position at market immediately. No action needed.
+   - `Wait` — bot spawns without a position. You must call `ForceStartPosition` from `on_analysis` or `on_indicators` to open one.
+3. `on_analysis` / `on_indicators` run continuously while the bot is alive — whether or not it has an open position.
+4. When a position closes, `on_finished` fires once. If `on_finished` is empty → bot stops automatically. If `on_finished` has any actions → bot keeps running indefinitely without a position. You must use `ForceStopBot` to stop it.
 
 ---
 
-## Bot lifecycle and `enter_price`
+## 3. Event handlers
 
-Understanding when each handler fires requires understanding the bot lifecycle:
+### `on_analysis` — main strategy loop (~1s)
 
-1. **Bot group** evaluates `professional.filters` when triggered by the `signal`. If all filters pass → **spawns a new bot** (subject to `max_active_bots`).
-2. The `signal` defines *what triggers the filter check* — it is not limited to a timer. `Indicator` (candle-close) is most common, but signals can react to external events, volume spikes, etc.
-3. **`enter_price`** determines what the freshly spawned bot does immediately:
-   - `Force` — opens a position at market price right away. No `ForceStartPosition` action needed.
-   - `Wait` — bot starts in waiting state. **You must call `ForceStartPosition` from `on_analysis` or `on_indicators`** to enter. Use `ForceStopBot` to exit if conditions expire without entering.
-4. Once the bot has an open position, `on_analysis` / `on_indicators` run continuously to manage it.
-5. When the position closes, **`on_finished`** fires once:
-   - If `on_finished` is **empty** → bot stops automatically.
-   - If `on_finished` has **any actions** → bot enters **waiting mode** and stays alive. Add `ForceStopBot` explicitly to stop it.
+Runs every ~1 second with fresh price and indicator data. **Use by default** for entry/exit logic, trailing stops, PnL checks, variable updates.
 
-**Decision rule:**
-- Use `enter_price: Force` when spawn conditions in `professional.filters` are sufficient to enter immediately — e.g. fresh MRC cross + NTPS > 50.
-- Use `enter_price: Wait` when you need a **two-phase** approach: spawn on one condition, then enter only when a secondary real-time condition passes in `on_analysis`/`on_indicators`.
+Item shape: `{ "type": "Action", "filters": [...], "action": {...} }` — all filters must pass for the action to execute.
 
-> **Re-spawn prevention:** `professional.filters` do NOT self-throttle. If conditions stay true across multiple signal ticks, a new bot spawns each tick (up to `max_active_bots`). Use one-candle events (e.g. `MRC PrevCross >= 1 AND CurrentCross < 1`) in filters to make the condition naturally single-fire per event.
+```json
+"on_analysis": [
+  { "type": "Action",
+    "filters": [ /* conditions */ ],
+    "action": { "type": "ForceStartPosition", "side": { "type": "Direction", "value": "LONG" } } }
+]
+```
 
----
+### `on_indicators` — candle close events
 
-## `on_created` — fires once when a new position opens
+Fires when a candle closes at the specified timeframe. Use for indicator-based triggers (EMA flip, Supertrend direction change, RSI threshold) rather than continuous price monitoring.
 
-`on_created` fires **once** immediately after a position is opened (first entry order fills). Use for one-time position setup that depends on the actual entry price or entry side.
+Item shape: `{ "timeframe": int, "filters": [...], "actions": [...] }` — note `actions` is an **array** (not singular).
 
-**Use for:** setting variables from entry price, logging entry, one-time setup.
-**Prefer over `on_analysis`** for setup to avoid re-running on every tick.
+```json
+"on_indicators": [
+  { "timeframe": 300, "filters": [], "actions": [
+    { "type": "Action", "filters": [ /* conditions */ ],
+      "action": { "type": "SetVariable", "name": "ema_flag", "value": { "type": "Number", "value": 1.0 } } }
+  ]}
+]
+```
+
+**Typical pattern:** use `on_indicators` to store indicator state in variables, then read those variables in `on_analysis` to make trading decisions.
+
+### `on_created` — fires once when a position opens
+
+Fires once immediately after the first entry order fills. Use for one-time setup: saving entry price to a variable, logging, initial order placement.
+
+Item shape: same as `on_analysis`.
 
 ```json
 "on_created": [
-  {
-    "type": "Action",
-    "filters": [],
-    "action": {
-      "type": "SetVariable",
-      "name": "initial_entry",
-      "value": { "type": "Position", "value": "EntryPrice" }
-    }
-  }
+  { "type": "Action", "filters": [],
+    "action": { "type": "SetVariable", "name": "entry_price", "value": { "type": "Position", "value": "EntryPrice" } } }
 ]
 ```
 
----
+### `on_finished` — fires when a position closes
 
-## `direction: "Both"` — LONG + SHORT in a single bot
+**Critical behavior:**
+- `on_finished` is **empty** → bot stops automatically.
+- `on_finished` has **any actions** → bot enters **waiting mode** and stays alive. You must add `ForceStopBot` explicitly to stop it.
 
-`direction: "Both"` allows a single bot to use both LONG and SHORT. This enables two patterns:
-
-- **Hedge mode** — hold LONG and SHORT positions simultaneously (both open at the same time)
-- **Reversal mode** — close one side and open the opposite (bot reverses direction)
-
-`Long` and `Short` restrict the bot to a single direction only.
-
-**Settings when using `Both`:**
-- `max_active_bots` — controls how many bots (symbols) the group can run; not related to direction
-- `enter_price` — any type is valid; describes what the bot does after starting
-- `margin_mode` — any; cross margin is preferred over isolated
+Item shape: same as `on_analysis`.
 
 ```json
-"on_analysis": [
-  {
-    "type": "Action",
-    "filters": [
-      { "type": "Operation", "operation": "==",
-        "left":  { "type": "Position", "side": { "type": "Direction", "value": "LONG" }, "value": "Amount" },
-        "right": { "type": "Number", "value": 0 } }
-    ],
-    "action": { "type": "ForceStartPosition", "side": { "type": "Direction", "value": "LONG" }, "msg": "Open LONG" }
-  },
-  {
-    "type": "Action",
-    "filters": [
-      { "type": "Operation", "operation": "==",
-        "left":  { "type": "Position", "side": { "type": "Direction", "value": "SHORT" }, "value": "Amount" },
-        "right": { "type": "Number", "value": 0 } }
-    ],
-    "action": { "type": "ForceStartPosition", "side": { "type": "Direction", "value": "SHORT" }, "msg": "Open SHORT" }
-  }
-]
-```
-
-> **Re-entry:** Use `on_finished` to re-open the closed side. Check `on_finished` section above for the revert/re-entry pattern.
-
----
-
-## `on_analysis` — use this by default
-
-The main strategy loop. Runs every ~1s with fresh price and indicator data. Use it to place orders, close positions, update variables, and react dynamically to market conditions.
-
-**Use for:** entry logic, exit logic, trailing stops, PnL checks, variable updates.
-
-Each item: `{ "filters": [...], "action": {...} }` — all filters must pass for the action to run.
-
-```json
-"on_analysis": [
-  {
-    "type": "Action",
-    "filters": [
-      { "type": "Operation", "operation": "==",
-        "left":  { "type": "Indicator", "token": "Chart", "timeframe": 3600, "idx": 0,
-                   "indicator": { "type": "Supertrend", "property": "Direction" } },
-        "right": { "type": "Direction", "value": "LONG" } }
-    ],
-    "action": {
-      "type": "ForceStartPosition",
-      "side": { "type": "Direction", "value": "LONG" },
-      "msg": "Supertrend Long"
-    }
-  }
-]
-```
-
----
-
-## `on_indicators` — use when reacting to candle close events
-
-Fires when a new candle closes at the specified timeframe. Use it when the trigger is a candle close (e.g. new EMA value, Supertrend flip) rather than continuous price monitoring.
-
-**Use for:** EMA direction changes, Supertrend flips, RSI threshold breaks, storing flags in variables.
-**Avoid for:** general order placement or PnL checks — use `on_analysis` for those.
-
-Each item: `{ "timeframe": int, "filters": [...], "actions": [...] }`
-
-```json
-"on_indicators": [
-  {
-    "timeframe": 300,
-    "filters": [
-      { "type": "Operation", "operation": "==",
-        "left":  { "type": "Indicator", "token": "Chart", "timeframe": 300, "idx": 0,
-                   "indicator": { "type": "Ema", "period": "5", "property": "Direction" } },
-        "right": { "type": "Direction", "value": "LONG" } }
-    ],
-    "actions": [
-      {
-        "type": "Action",
-        "filters": [],
-        "action": { "type": "SetVariable", "name": "ema5_long", "value": { "type": "Number", "value": 1.0 } }
-      }
-    ]
-  }
-]
-```
-
----
-
-## `on_finished` — fires when a position closes
-
-**Critical behaviour: `on_finished` actions put the bot into waiting mode.**
-
-- **`on_finished` is empty** → bot stops automatically after position closes.
-- **`on_finished` has any actions** → bot transitions to **waiting mode** after position closes and stays alive. It will NOT stop on its own.
-  - Add `ForceStopBot` as the last action if you want the bot to stop after running `on_finished`.
-  - Omit `ForceStopBot` if you want the bot to stay alive and re-enter (e.g. grid, revert strategies).
-
-```json
-// Pattern A — run cleanup then stop bot
 "on_finished": [
-  {
-    "type": "Action",
-    "filters": [],
-    "action": { "type": "SetVariable", "name": "last_side", "value": { "type": "Position", "value": "Direction" } }
-  },
-  {
-    "type": "Action",
-    "filters": [],
-    "action": { "type": "ForceStopBot", "msg": "Cleanup done, stopping" }
-  }
-]
-
-// Pattern B — revert direction and re-enter (bot stays alive in waiting, immediately re-enters)
-"on_finished": [
-  {
-    "type": "Action",
-    "filters": [],
-    "action": { "type": "SetDirection", "value": { "type": "Position", "value": "DirectionOpposite" } }
-  },
-  {
-    "type": "Action",
-    "filters": [],
-    "action": { "type": "ForceStartPosition", "side": { "type": "Global", "value": "Direction" }, "msg": "Revert" }
-  }
+  { "type": "Action", "filters": [],
+    "action": { "type": "ForceStopBot", "msg": "Position closed, stopping" } }
 ]
 ```
 
-**Note:** `ForceStartPosition.side` is **required**. Use `{ "type": "Global", "value": "Direction" }` to follow whatever direction was just set by `SetDirection`.
+**Revert pattern** (bot stays alive, reverses direction, re-enters):
+```json
+"on_finished": [
+  { "type": "Action", "filters": [],
+    "action": { "type": "SetDirection", "value": { "type": "Position", "value": "DirectionOpposite" } } },
+  { "type": "Action", "filters": [],
+    "action": { "type": "ForceStartPosition", "side": { "type": "Global", "value": "Direction" }, "msg": "Revert" } }
+]
+```
 
----
+**Conditional branches** — use `Actions` + `Break` to run only one branch:
+```json
+"on_finished": [
+  { "type": "Action", "filters": [ /* condition A */ ],
+    "action": { "type": "Actions", "actions": [
+      { "filters": [], "action": { "type": "ForceStopBot", "msg": "SL hit" } },
+      { "filters": [], "action": { "type": "Break", "level": 2 } }
+    ]}},
+  { "type": "Action", "filters": [],
+    "action": { "type": "ForceStopBot", "msg": "Fallback — runs only if A didn't match" } }
+]
+```
 
-## `on_actions` — avoid; only for very specific manual tasks
+### `on_actions` — manual UI triggers only
 
-Fires on a manual user action from the UI. **This is not for auto trading.** Only use it when the user explicitly needs to trigger something manually.
+Fires on a manual user action from the UI. **Not for auto trading.** Omit in most strategies.
 
-In almost all auto-trading strategies, `on_actions` should not be present.
+Item shape: `{ "name": "...", "params": [...], "actions": [...] }`
 
-Each item: `{ "name": "...", "params": [...], "actions": [...] }`
+`params` defines UI input fields. Each param has `name`, `code`, and `variant` (`"Number"`, `"Direction"`, `"OrderType"`, `"PriceRange"`, or `"Select"`). Access param values in actions via `{ "type": "Parameter", "name": "param_code" }`.
 
 ```json
 "on_actions": [
-  {
-    "name": "manual_close",
-    "params": [],
-    "actions": [
-      {
-        "type": "Action",
-        "filters": [],
-        "action": { "type": "ForceStopPosition", "side": null, "msg": "Manual close" }
-      }
-    ]
-  }
+  { "name": "manual_close", "params": [], "actions": [
+    { "type": "Action", "filters": [],
+      "action": { "type": "ForceStopPosition", "side": null, "msg": "Manual close" } }
+  ]}
 ]
 ```
 
 ---
 
-## `FireAlert` — send a push notification from inside a strategy
+## 4. `direction: "Both"` — LONG + SHORT in a single bot
 
-Use `FireAlert` anywhere an action is allowed (`on_analysis`, `on_indicators`, `on_finished`, `on_created`, `on_actions`). When evaluated, it queues a notification that:
+Enables two patterns:
+- **Hedge mode** — hold LONG and SHORT positions simultaneously
+- **Reversal mode** — close one side and open the opposite
 
-1. Is **persisted** to the user's notification table (visible in the bell feed).
-2. Is **broadcast over WebSocket** to connected clients in real time.
-3. Includes the **bot name** and **symbol** automatically in the notification.
+When using `Both`, specify `side` explicitly on every `ForceStartPosition` / `ForceStopPosition`. Use `Position` value with `side` to check each side independently.
 
-### `msg` format
+Cross margin is preferred over isolated with `Both`.
 
-`msg` is an array of **message parts**. Each part is either static text or a dynamic value expression:
+---
+
+## 5. Variables
+
+`variables` holds named values that persist across ticks. Use them to share state between handlers, track multi-step conditions, or compute derived values.
+
+```json
+"variables": [
+  { "type": "Variable", "name": "Display Label", "key": "var_key", "default": { "type": "Number", "value": 0.0 } }
+]
+```
+
+| Field | Description |
+|-------|-------------|
+| `type` | **Must** be `"Variable"` |
+| `name` | Display label (UI only) |
+| `key` | Identifier used in `SetVariable`, `ClearVariable`, and `{ "type": "Variable", "name": "key" }` value references |
+| `default` | Initial value — any value expression (Number, Global, Indicator, Math, PriceMeasure, etc.) |
+
+**Evaluation order:** variables initialise sequentially at bot spawn time. Each variable's `default` can reference any **previously defined** variable (lower index). Forward references are not resolved.
+
+**Refreshing variables:** defaults are only evaluated at spawn. Use `SetVariable` in `on_indicators` to update values on each candle close.
+
+---
+
+## 6. Action Reference
+
+Every action below can be used in any handler (`on_analysis`, `on_created`, `on_indicators`, `on_finished`, `on_actions`).
+
+---
+
+### `ForceStartPosition` — open a position
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `side` | value → Direction | **yes** | Position side. Use `{"type":"Global","value":"Direction"}` to follow current bot direction |
+| `amount` | value → Float | no | Override `enter_amount`. When omitted, uses `professional.enter_amount` |
+| `enter_price` | value → Float | no | Override entry price. When omitted, enters at market |
+| `order_type` | value → OrderType | no | Override order type (MARKET/LIMIT/STOP_MARKET/STOP_LIMIT) |
+| `modifications` | array | no | Grid modifications for this position (see below) |
+| `msg` | string | no | Log message |
+
+**`modifications`:** `professional.modifications` only applies to the initial position opened via `enter_price: Force`. When using `enter_price: Wait`, the top-level modifications do **not** carry over — you must pass `modifications` on each `ForceStartPosition`. The array format is identical to `professional.modifications` (see `strategy-modifications` skill). You can reuse the same config or pass different grids per position.
+
+```json
+{ "type": "ForceStartPosition", "side": { "type": "Direction", "value": "LONG" }, "msg": "Open LONG" }
+```
+
+---
+
+### `ForceStopPosition` — close a position
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `side` | value → Direction or `null` | no | Which side to close. `null` = close all |
+| `msg` | string | no | Log message |
+
+```json
+{ "type": "ForceStopPosition", "side": null, "msg": "Close all" }
+```
+
+---
+
+### `CreateOrder` — create or update an order
+
+**Important:** if a pending order with the same `mark` and `pside` already exists, `CreateOrder` **updates** it instead of creating a new one. If no matching pending order exists, a new order is created. Filled orders are not tracked — if an order with a given mark has already filled and you call `CreateOrder` with the same mark, a new order will be created. Without a `mark`, every call creates a new order, which can lead to duplicate orders.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `amount` | value → Float | **yes** | Order amount (USDT) |
+| `side` | value → Direction | **yes** | Order side |
+| `price` | value → Float | no | Limit price. Omit for market orders |
+| `order_type` | `"MARKET"` / `"LIMIT"` / `"STOP_MARKET"` / `"STOP_LIMIT"` | no | Auto-detected from price vs current price when omitted |
+| `pside` | value → Direction | no | Position side (hedge mode) |
+| `mark` | value → String | no | Tag for matching. Orders are matched by `mark` + `pside`. **Always use `mark` to avoid creating duplicate orders** |
+| `msg` | string | no | Log message |
+
+```json
+{ "type": "CreateOrder", "amount": { "type": "Number", "value": 100 }, "side": { "type": "Direction", "value": "LONG" }, "price": { "type": "Global", "value": "Price" }, "order_type": "LIMIT", "mark": { "type": "String", "value": "DCA1" } }
+```
+
+---
+
+### `RemoveOrder` — cancel a marked order
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `mark` | value → String | **yes** | Tag of the order to cancel |
+| `pside` | value → Direction | no | Position side (hedge mode) |
+
+```json
+{ "type": "RemoveOrder", "mark": { "type": "String", "value": "DCA1" } }
+```
+
+---
+
+### `SetVariable` / `ClearVariable` — manage bot state
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | **yes** | Must match the `key` from `variables` array |
+| `value` | any value expression | **yes** (SetVariable only) | New value |
+
+```json
+{ "type": "SetVariable", "name": "counter", "value": { "type": "Number", "value": 1.0 } }
+{ "type": "ClearVariable", "name": "counter" }
+```
+
+---
+
+### `SetDirection`, `SetAmount`, `SetEnterPrice`, `ClearEnterPrice`, `SetOrderType` — update global values
+
+These actions update the bot's global values (readable via `{ "type": "Global", "value": "Direction" }` etc.). They do not directly affect open positions or orders — they change what subsequent actions and evaluations will use.
+
+`SetDirection` only affects how direction-aware auto comparisons (`>A`, `<A`) resolve in conditions.
+
+| Action | Field | Type | Description |
+|--------|-------|------|-------------|
+| `SetDirection` | `value` | value → Direction | Updates `Global.Direction` |
+| `SetAmount` | `value` | value → Float | Updates `Global.Amount` |
+| `SetEnterPrice` | `value` | value → Float | Updates `Global.EnterPrice` |
+| `ClearEnterPrice` | — | — | Resets `Global.EnterPrice` to default |
+| `SetOrderType` | `value` | value → OrderType | Updates the default order type |
+
+```json
+{ "type": "SetDirection", "value": { "type": "Position", "value": "DirectionOpposite" } }
+{ "type": "SetAmount", "value": { "type": "Number", "value": 200.0 } }
+{ "type": "SetEnterPrice", "value": { "type": "Global", "value": "Price" } }
+{ "type": "ClearEnterPrice" }
+{ "type": "SetOrderType", "value": { "type": "OrderType", "value": "LIMIT" } }
+```
+
+---
+
+### `SetPositionEnterPrice` — override recorded entry price of an open position
+
+Overrides the average entry price stored on an open position. TP/SL calculations will anchor to this new price instead of the actual fill price.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `value` | value → Float | **yes** | New entry price |
+| `side` | value → Direction | no | Target position side in hedge mode. Omit to target current position |
+
+```json
+{ "type": "SetPositionEnterPrice", "value": { "type": "Global", "value": "Price" } }
+```
+
+
+---
+
+### `ForceStopBot` — stop the bot entirely
+
+Stops the bot immediately, regardless of open positions.
+
+| Field | Type | Required |
+|-------|------|----------|
+| `msg` | string | no |
+
+```json
+{ "type": "ForceStopBot", "msg": "Conditions expired" }
+```
+
+---
+
+### `FireAlert` — send a push notification
+
+Queues a persistent notification (saved to bell feed + broadcast via WebSocket). Bot name and symbol are included automatically.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `msg` | array of parts | **yes** | Message content — array of `Text` and `Value` parts |
+
+**Part types:**
 
 | Part type | Fields | Description |
 |-----------|--------|-------------|
-| `Text`    | `value` (string) | Literal text appended to the message |
-| `Value`   | `value` (value expression), `precision` (optional int) | Resolves a value expression at runtime; `precision` controls decimal places for floats |
+| `Text` | `value` (string) | Literal text |
+| `Value` | `value` (value expression), `precision` (optional int) | Dynamic value resolved at runtime. `precision` controls decimal places |
 
-**Simple example** (static text only):
 ```json
-{ "type": "FireAlert", "msg": [{ "type": "Text", "value": "TP hit on BTC-USDT" }] }
+{ "type": "FireAlert", "msg": [
+  { "type": "Text", "value": "PnL: " },
+  { "type": "Value", "value": { "type": "Position", "value": "Pnl" }, "precision": 2 }
+]}
 ```
-
-**Dynamic example** (text + value expressions):
-```json
-{
-  "type": "FireAlert",
-  "msg": [
-    { "type": "Text", "value": "PnL is " },
-    { "type": "Value", "value": { "type": "Position", "value": "Pnl" }, "precision": 2 },
-    { "type": "Text", "value": "$ at price " },
-    { "type": "Value", "value": { "type": "Global", "value": "Price" }, "precision": 4 }
-  ]
-}
-```
-
-This produces a notification like: `[MyBot] PnL is 12.34$ at price 68421.5000`
 
 **Rules:**
-- `msg` must contain at least one part. If the final composed message is empty or whitespace-only, the alert is silently ignored.
-- Any value expression type is supported (Global, Position, Variable, Math, Indicator, etc.).
-- If a `Value` part resolves to `None` (e.g. referencing a variable that doesn't exist), that segment is omitted.
-- `precision` only affects float values. Omit it or set to `null` to use default float formatting.
-- Use `filters` on the enclosing `Action` item to control when the alert fires.
-- **Backward compatibility:** `msg` as a plain string (e.g. `"msg": "some text"`) is still accepted by the backend and treated as a single `Text` part.
-
-**Common patterns:**
-
-```json
-// Notify with current PnL when threshold is crossed
-{
-  "type": "Action",
-  "filters": [
-    { "type": "Operation", "operation": ">",
-      "left":  { "type": "Position", "side": { "type": "Direction", "value": "LONG" }, "value": "Pnl" },
-      "right": { "type": "Number", "value": 200.0 } }
-  ],
-  "action": {
-    "type": "FireAlert",
-    "msg": [
-      { "type": "Text", "value": "LONG PnL crossed $200, now at " },
-      { "type": "Value", "value": { "type": "Position", "side": { "type": "Direction", "value": "LONG" }, "value": "Pnl" }, "precision": 2 },
-      { "type": "Text", "value": "$" }
-    ]
-  }
-}
-
-// Notify when the bot stops (simple text)
-{
-  "type": "Action",
-  "filters": [],
-  "action": { "type": "FireAlert", "msg": [{ "type": "Text", "value": "Bot stopped" }] }
-}
-```
-
-> **Note:** `FireAlert` is fire-and-forget — it does not block subsequent actions or affect bot state. It can coexist with any other action in the same handler.
+- At least one part required. Empty/whitespace-only messages are silently ignored.
+- If a `Value` resolves to `None`, that segment is omitted.
+- Backward compatible: `"msg": "plain string"` is also accepted.
+- Fire-and-forget — does not block subsequent actions or affect bot state.
 
 ---
 
-## Variables — storing strategy state
+### `Actions` — sequential block of sub-actions
 
-`variables` is declared at the top of `professional` and holds named values that persist across ticks. Use them to share state between `on_indicators` and `on_analysis`, track multi-step conditions, or accumulate counters.
-
-```json
-"variables": [
-  { "type": "Variable", "name": "EMA5 Direction", "key": "ema5_long",       "default": { "type": "Number", "value": 0.0 } },
-  { "type": "Variable", "name": "Entry Confirmed", "key": "entry_confirmed", "default": { "type": "Number", "value": 0.0 } }
-]
-```
-
-**IMPORTANT:** Every variable entry **must** include `"type": "Variable"`.
-
-- `name` — display label only
-- `key` — used everywhere to reference this variable (in SetVariable, ClearVariable, Variable value)
-- `default` — initial value (optional). Accepts **any `TradeSettingProValue` expression** — not just `Number`.
-
-### Variable evaluation order
-
-Variables are **initialised sequentially** in array order at bot spawn time. Each variable's `default` expression is evaluated before moving to the next. This means a variable can reference **any variable defined before it** (lower index) in its `default` expression — the previous variable's value is already resolved.
+Wraps multiple actions into one. Each sub-action has its own `filters`.
 
 ```json
-"variables": [
-  {
-    "type": "Variable", "name": "MRC Range %", "key": "mrc_range_pct",
-    "default": {
-      "type": "PriceMeasure", "is_abs": true,
-      "left":  { "type": "Indicator", "token": "Chart", "timeframe": 60, "idx": 0,
-                 "indicator": { "type": "Mrc", "period": "200", "property": "DownInner" } },
-      "right": { "type": "Indicator", "token": "Chart", "timeframe": 60, "idx": 0,
-                 "indicator": { "type": "Mrc", "period": "200", "property": "UpBig" } }
-    }
-  },
-  {
-    "type": "Variable", "name": "SL %", "key": "sl_pct",
-    "default": {
-      "type": "Math",
-      "value": {
-        "type": "Operation", "operation": "/",
-        "left":  { "type": "Variable", "name": "mrc_range_pct" },
-        "right": { "type": "Number", "value": -2.0 }
-      }
-    }
-  }
-]
-```
-
-Here `sl_pct` reads `mrc_range_pct` in its default because `mrc_range_pct` is at index 0 (already computed).
-
-> **Rule:** only reference variables with a **lower index** in a `default` expression. Forward references (higher index) are not yet resolved.
-
-All defaults are evaluated at **bot spawn time** (before the first candle close). Combine with `on_indicators` `SetVariable` to refresh values on every candle close.
-
-Read a variable in a filter:
-```json
-{ "type": "Operation", "operation": "==",
-  "left":  { "type": "Variable", "name": "ema5_long" },
-  "right": { "type": "Number", "value": 1.0 } }
-```
-
-Set / clear a variable in an action:
-```json
-{ "type": "SetVariable",   "name": "ema5_long", "value": { "type": "Number", "value": 1.0 } }
-{ "type": "ClearVariable", "name": "ema5_long" }
+{ "type": "Actions", "actions": [
+  { "filters": [], "action": { "type": "SetVariable", "name": "x", "value": { "type": "Number", "value": 1 } } },
+  { "filters": [], "action": { "type": "ForceStopBot", "msg": "Done" } }
+]}
 ```
 
 ---
-
-## Combined pattern — on_indicators + on_analysis
-
-Use `on_indicators` to detect an EMA direction change on the 5m chart and store it in a variable. Use `on_analysis` to act on that state along with a live RSI check:
-
-```json
-"variables": [
-  { "type": "Variable", "name": "EMA5 Long", "key": "ema5_long", "default": { "type": "Number", "value": 0.0 } }
-],
-"on_indicators": [
-  {
-    "timeframe": 300,
-    "filters": [],
-    "actions": [
-      {
-        "type": "Action",
-        "filters": [
-          { "type": "Operation", "operation": "==",
-            "left":  { "type": "Indicator", "token": "Chart", "timeframe": 300, "idx": 0,
-                       "indicator": { "type": "Ema", "period": "5", "property": "Direction" } },
-            "right": { "type": "Direction", "value": "LONG" } }
-        ],
-        "action": { "type": "SetVariable", "name": "ema5_long", "value": { "type": "Number", "value": 1.0 } }
-      },
-      {
-        "type": "Action",
-        "filters": [
-          { "type": "Operation", "operation": "==",
-            "left":  { "type": "Indicator", "token": "Chart", "timeframe": 300, "idx": 0,
-                       "indicator": { "type": "Ema", "period": "5", "property": "Direction" } },
-            "right": { "type": "Direction", "value": "SHORT" } }
-        ],
-        "action": { "type": "ClearVariable", "name": "ema5_long" }
-      }
-    ]
-  }
-],
-"on_analysis": [
-  {
-    "type": "Action",
-    "filters": [
-      { "type": "Operation", "operation": "==",
-        "left":  { "type": "Variable", "name": "ema5_long" },
-        "right": { "type": "Number", "value": 1.0 } },
-      { "type": "Operation", "operation": "<",
-        "left":  { "type": "Indicator", "token": "Chart", "timeframe": 3600, "idx": 0,
-                   "indicator": { "type": "Rsi", "period": "14", "property": "Value" } },
-        "right": { "type": "Number", "value": 35.0 } }
-    ],
-    "action": {
-      "type": "ForceStartPosition",
-      "side": { "type": "Direction", "value": "LONG" },
-      "msg": "EMA5 Long + RSI oversold"
-    }
-  },
-  {
-    "type": "Action",
-    "filters": [
-      { "type": "Operation", "operation": ">",
-        "left":  { "type": "Position", "side": { "type": "Direction", "value": "LONG" }, "value": "Pnl" },
-        "right": { "type": "Number", "value": 150.0 } }
-    ],
-    "action": {
-      "type": "ForceStopPosition",
-      "side": { "type": "Direction", "value": "LONG" },
-      "msg": "Profit target"
-    }
-  }
-]
-```
-
----
-
-## All available actions
-
-```json
-{ "type": "ForceStartPosition", "amount": {}, "side": { /* required — use {"type":"Global","value":"Direction"} to follow current set direction */ }, "enter_price": {}, "order_type": {}, "msg": "" }
-{ "type": "ForceStopPosition",  "side": null, "msg": "" }
-{ "type": "CreateOrder", "amount": {}, "side": {}, "price": {}, "order_type": "MARKET"|"LIMIT"|"STOP_MARKET"|"STOP_LIMIT", "pside": {}, "mark": {}, "msg": "" }
-{ "type": "RemoveOrder",    "mark": {}, "pside": {} }
-{ "type": "SetVariable",    "name": "key", "value": {} }
-{ "type": "ClearVariable",  "name": "key" }
-{ "type": "SetDirection",   "value": {} }
-{ "type": "SetAmount",      "value": {} }
-{ "type": "SetEnterPrice",  "value": {} }
-{ "type": "ClearEnterPrice" }
-{ "type": "ForceStopBot",   "msg": "" }
-{ "type": "Wait" }
-{ "type": "Break", "level": 1 }
-```
 
 ### `Break` — early exit from nested action lists
 
-`Break` stops processing the current action list and optionally exits outer levels.
+Stops processing the current action list and optionally exits outer levels.
 
-- `level: 1` — exits the **current** action list (the `Actions` block or the handler array you're in)
-- `level: 2` — exits **2 levels**: the current block AND the outer handler list (e.g., exits both the inner `Actions.actions[]` and the outer `on_finished[]`)
-- Higher levels exit that many levels of nesting
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `level` | integer | `1` | How many nesting levels to exit |
 
-**Use in `on_finished` to prevent a catch-all fallback from running after a conditional branch:**
+- `level: 1` — exits the current `Actions` block or handler array
+- `level: 2` — exits 2 levels (e.g., inner `Actions.actions[]` AND the outer `on_finished[]`)
+
+Use with `Actions` in `on_finished` to implement conditional branches where only one branch fires.
 
 ```json
-// on_finished with conditional branches — only one branch fires
-"on_finished": [
-  {
-    "type": "Action",
-    "filters": [ { /* condition A — e.g. SL hit */ } ],
-    "action": {
-      "type": "Actions",
-      "actions": [
-        { "filters": [], "action": { "type": "ForceStopBot", "msg": "SL — stop" } },
-        { "filters": [], "action": { "type": "Break", "level": 2 } }
-      ]
-    }
-  },
-  {
-    "type": "Action",
-    "filters": [ { /* condition B — e.g. TP hit */ } ],
-    "action": {
-      "type": "Actions",
-      "actions": [
-        { "filters": [], "action": { "type": "SetVariable", "name": "counter", "value": { "type": "Number", "value": 0 } } },
-        { "filters": [], "action": { "type": "Break", "level": 2 } }
-      ]
-    }
-  },
-  {
-    "type": "Action",
-    "filters": [],
-    "action": { "type": "ForceStopBot", "msg": "Fallback — should never run after A or B" }
-  }
-]
+{ "type": "Break", "level": 2 }
 ```
 
-> **Note on waiting mode:** When a bot is in **waiting mode** (no open position, after `on_finished`), do NOT use `Position.Amount == 0` as a guard in `on_indicators` — in waiting mode `Position.Amount` may not resolve correctly. Use `IsEmpty` with a Position value to reliably detect no active position:
-> ```json
-> { "type": "IsEmpty", "value": { "type": "Position", "side": { "type": "Direction", "value": "LONG" }, "value": "Amount" } }
-> ```
-> Combine with a variable flag (e.g. `position_count == 1`) to track which lifecycle stage the bot is in.
+---
+
+### `Wait` — set bot to waiting mode
+
+No fields. Sets the bot into waiting mode (same as when `enter_price: Wait` is used at spawn). Rarely needed since waiting mode is typically set via `enter_price: Wait` at initialization.
+
+```json
+{ "type": "Wait" }
+```
+
+---
+
+## 7. Notes
+
+**Position amount checks — `IsEmpty` vs `== 0` vs `> 0`:**
+
+These three checks have distinct meanings:
+
+| Check | Meaning |
+|-------|---------|
+| `IsEmpty(Position.Amount)` | No position exists — no orders placed, nothing in progress |
+| `Position.Amount == 0` | Position exists with at least one pending entry order, but not filled yet. Use `SetPositionEnterPrice` to change the entry order price |
+| `Position.Amount > 0` | Position is open on the exchange. Use `CreateOrder` to add extra amount or partially close |
+
+```json
+// No position at all
+{ "type": "IsEmpty", "value": { "type": "Position", "side": { "type": "Direction", "value": "LONG" }, "value": "Amount" } }
+
+// Position created but not filled yet
+{ "type": "Operation", "operation": "==",
+  "left": { "type": "Position", "side": { "type": "Direction", "value": "LONG" }, "value": "Amount" },
+  "right": { "type": "Number", "value": 0.0 } }
+
+// Position open on exchange
+{ "type": "Operation", "operation": ">",
+  "left": { "type": "Position", "side": { "type": "Direction", "value": "LONG" }, "value": "Amount" },
+  "right": { "type": "Number", "value": 0.0 } }
+```

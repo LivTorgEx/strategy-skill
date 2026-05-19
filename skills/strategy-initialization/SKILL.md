@@ -288,6 +288,86 @@ Overrides the bot's initial amount using a `Math` expression.
 
 ---
 
+## `extra_orders` — DCA / scaling orders ONLY for simpler strategies without on_analysis logic
+
+`professional.extra_orders` is an optional field that defines additional orders placed **after** the initial entry. Use it for DCA (dollar-cost averaging) or scaling into a position.
+
+> **`extra_orders` vs `modifications` (Grid):** These are separate features for different strategies. Use `extra_orders` for DCA strategies where you want discrete additional entries at specific price offsets. Use `modifications` (Grid) when you want a full grid of levels across a price range. Do not combine both — use one or the other.
+
+### Order template (`TradeSettingProExtraOrderNext`)
+
+Each extra order is defined by:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `order_type` | `"MARKET"` / `"LIMIT"` / `"STOP_MARKET"` / `"STOP_LIMIT"` | no | Defaults to auto-detection based on price vs current price |
+| `price` | PriceDepends | yes | Price of the order — see `strategy-conditions` skill for all base types |
+| `amount` | Amount | yes | `{ "type": "Percentage", "source": "FirstOrder"\|"MaxAmount"\|"LastOrder", "value": 100.0 }` |
+| `min_filter_tf` | integer (seconds) | no | Throttle filter re-evaluation — when set, filters only re-check once per this timeframe window |
+| `filters` | array of conditions | no | Gate conditions — order is only placed when all pass |
+
+### `Loop` — repeating DCA template
+
+Places up to `size` identical orders using the same template. Each order's price is calculated relative to the **previous** order (not the entry).
+
+```json
+"extra_orders": {
+  "type": "Loop",
+  "next_order": {
+    "order_type": "LIMIT",
+    "price": { "type": "LastOrder", "price": { "type": "Percentage", "value": -1.5 } },
+    "amount": { "type": "Percentage", "source": "FirstOrder", "value": 100.0 },
+    "filters": []
+  },
+  "min_filter_tf": 300,
+  "filters": [],
+  "size": 3
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `next_order` | order template | The repeating order definition |
+| `size` | integer | Maximum number of extra orders to place |
+| `min_filter_tf` | integer (seconds) | Throttle for loop-level filter re-evaluation |
+| `filters` | array of conditions | Loop-level gate — all must pass before any extra order is considered |
+
+> Example above: 3 DCA orders, each 1.5% below the previous, same size as the first entry.
+
+### `Fixed` — explicit list of orders
+
+Defines each extra order individually — use when DCA levels have different sizes or spacing.
+
+```json
+"extra_orders": {
+  "type": "Fixed",
+  "orders": [
+    {
+      "order_type": "LIMIT",
+      "price": { "type": "Position", "price": { "type": "Percentage", "value": -2.0 } },
+      "amount": { "type": "Percentage", "source": "FirstOrder", "value": 50.0 },
+      "filters": []
+    },
+    {
+      "order_type": "LIMIT",
+      "price": { "type": "Position", "price": { "type": "Percentage", "value": -4.0 } },
+      "amount": { "type": "Percentage", "source": "FirstOrder", "value": 100.0 },
+      "filters": []
+    },
+    {
+      "order_type": "LIMIT",
+      "price": { "type": "Position", "price": { "type": "Percentage", "value": -7.0 } },
+      "amount": { "type": "Percentage", "source": "FirstOrder", "value": 200.0 },
+      "filters": []
+    }
+  ]
+}
+```
+
+> Example above: 3 DCA levels with increasing size — 50% at -2%, 100% at -4%, 200% at -7% from average entry.
+
+---
+
 ## Full initialization example (`direction: "Both"`, grid)
 
 ```json

@@ -1,6 +1,6 @@
 ---
 name: strategy-modifications
-description: LivTorgEx modifications reference — how to configure position-level modifications (currently Grid). Use when building strategies that need per-position grid order management.
+description: LivTorgEx modifications reference — how to configure position-level modifications (currently Grid with Arithmetic, Static, Geometric, Pick types). Use when building strategies that need per-position grid order management.
 ---
 
 # LivTorgEx — Modifications Reference
@@ -102,6 +102,33 @@ Grid levels are spaced by an equal percentage ratio between every level (exponen
 - Ratio = `(max_price / min_price) ^ (1 / count)` — same percentage change between every level
 
 **Use when:** you want equal percentage returns per level regardless of price (tighter spacing near lower prices).
+
+#### `Pick` — conditional grid type selection
+
+Evaluates branches in order; the first branch whose `filters` all pass selects the grid type. Falls back to `default` if no branch matches.
+
+```json
+"grid_type": {
+  "type": "Pick",
+  "values": [
+    {
+      "filters": [
+        { "type": "Operation", "operation": ">",
+          "left":  { "type": "Indicator", "token": "Chart", "timeframe": 3600, "idx": 0,
+                     "indicator": { "type": "Natr", "period": "14", "property": "Value" } },
+          "right": { "type": "Number", "value": 1.0 } }
+      ],
+      "value": { "type": "Geometric", "count": { "type": "Number", "value": 20 } }
+    }
+  ],
+  "default": { "type": "Arithmetic", "count": { "type": "Number", "value": 10 } }
+}
+```
+
+- `values` — array of `{ filters, value }` branches. Each `value` is a full grid_type (Static, Arithmetic, Geometric, or nested Pick).
+- `default` — optional fallback grid type when no branch matches. If omitted and no branch matches, the grid has no type (effectively disabled).
+
+**Use when:** the grid spacing algorithm should adapt to market conditions at spawn time (e.g., geometric spacing during high volatility, arithmetic during low volatility).
 
 ---
 

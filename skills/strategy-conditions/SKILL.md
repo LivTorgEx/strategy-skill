@@ -132,7 +132,7 @@ Use `<A`/`>A` when the same condition should work for both long and short entrie
 { "type": "ClearEnterPrice" }
 { "type": "SetOrderType",   "value": { "type": "OrderType", "value": "LIMIT" } }
 { "type": "ForceStopBot",   "msg": "reason" }
-{ "type": "Wait" }
+{ "type": "Wait" }  // sets bot to waiting mode (same as enter_price: Wait)
 { "type": "Break", "level": 1 }
 
 // Fire an alert notification — sends a push notification to the user.
@@ -242,11 +242,13 @@ The `price` field in a TP/SL order wraps a **base price** + a **price condition*
 
 | `type` | Base price used |
 |--------|----------------|
+| `Price` | Current market price at evaluation time — `{ "type": "Price", "price": { "type": "Percentage", "value": -1.0 } }` |
 | `FirstPrice` | Price of the first order placed in this position |
 | `Position` | Average entry price of the position (**preferred** — correct when position has multiple entries) |
 | `LastOrder` | Price of the most recent order |
 | `Indicator` | Value of an indicator at order creation time (`source` + `price` offset) |
 | `Variable` | Value of a named variable |
+| `Signal` | Signal's suggested price — wraps `setting` (signal config), `direction` (`"Follow"`/`"Opposite"`), `min_distance` (PriceDepends) |
 
 The price condition (`price` sub-field) is one of:
 
@@ -254,6 +256,11 @@ The price condition (`price` sub-field) is one of:
 |--------|-------------|
 | `Percentage` | Fixed % offset — `{ "type": "Percentage", "value": -1.5 }` |
 | `PercentageVariable` | Read % from a named variable — `{ "type": "PercentageVariable", "name": "sl_pct" }` |
+| `Ticks` | Fixed tick offset — `{ "type": "Ticks", "value": 10.0 }` — adds `value × price_tick_size` to the base price. Use when SL/TP should be a fixed number of ticks from entry (common in futures with known tick sizes). Negative values offset below the base price. |
+
+### `min_filter_tf` — throttle filter re-evaluation on orders
+
+`min_filter_tf` is an optional integer (seconds) that appears on order templates (inside `extra_orders`, TP/SL, and grid modifications). It throttles how frequently the associated `filters` array is re-evaluated. When set to `300` (5 minutes), filters are only checked once per 5-minute candle close, even if the analysis loop runs every second. When omitted, filters are checked on every tick.
 
 ### Dynamic TP/SL using variables + sequential defaults
 
