@@ -150,10 +150,10 @@ Signal actions let you manually trigger strategy logic on a running bot group (e
 | Variant | Value format | Example |
 |---------|-------------|---------|
 | `Number` | `f64` | `45000.0` |
-| `Direction` | `"buy"` or `"sell"` | `"buy"` |
+| `Direction` | `"LONG"`, `"SHORT"`, or `"BOTH"` | `"LONG"` |
 | `OrderType` | `"Market"` or `"Limit"` | `"Market"` |
 | `PriceRange` | Two keys: `{code}_lower` and `{code}_upper` (both `f64`) | `"range_lower": 44000.0, "range_upper": 46000.0` |
-| `Select` | Numeric index of the selected option (`f64`) | `0.0` (first option) |
+| `Select` | The option's `value` (f64) | `0.0` (matches first option) |
 
 Call MCP tool: `run_bot_group_action`
 Arguments:
@@ -163,7 +163,7 @@ Arguments:
   "code": "action_code",
   "symbol_key": "OKX#BTC-USDT-SWAP",
   "price": 45000.0,
-  "direction": "buy",
+  "direction": "LONG",
   "leverage": null,
   "margin": null,
   "values": {
@@ -174,7 +174,7 @@ Arguments:
 ```
 
 - `price` is **required** — pass the current market price for the symbol.
-- `direction` defaults to `"buy"` if omitted.
+- `direction` defaults to `"LONG"` if omitted.
 - `values` may be empty `{}` if the action has no params.
 - Bot group must have `skill_access` = `"Edit"` and must not be linked to a strategy NFT worker.
 
@@ -343,7 +343,7 @@ There are two distinct layers of manual triggers, and both can be used together.
 ]
 ```
 
-Pass this in `upsert_bot_group` alongside `settings`. For the `signal` field to honour this, set `signal` to `Action` with the matching code:
+Pass this in `create_bot_group` / `update_bot_group` alongside `settings`. For the `signal` field to honour this, set `signal` to `Action` with the matching code:
 
 ```json
 "signal": { "name": "Action", "code": "start" }
@@ -351,9 +351,70 @@ Pass this in `upsert_bot_group` alongside `settings`. For the `signal` field to 
 
 **Empty symbols:** When using signal actions you can leave `symbols: []` on the bot group. The token is provided by the caller at trigger time via `symbol_key` in `run_bot_group_action` — no need to pre-configure symbols.
 
+#### Defining `signal_actions` params
+
+Each entry in the `signal_actions` array has `code` (string), `name` (string), optional `description` (string), and an optional `params` array. Each param has:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Human-readable label (e.g. "Grid lower") |
+| `code` | string | yes | Machine code used as key in `values` / `action_params` |
+| `variant` | string | yes | One of: `"Number"`, `"Direction"`, `"OrderType"`, `"PriceRange"`, `"Select"` |
+| `default` | any | no | Default value when caller omits the param. Shape depends on variant (see below). |
+| `options` | array | Select only | Array of `{ "label": string, "value": number }` choices |
+
+**Variant-specific defaults:**
+
+| Variant | Default shape | Example |
+|---------|--------------|---------|
+| `Number` | number | `5.0` |
+| `Direction` | `"LONG"`, `"SHORT"`, or `"BOTH"` | `"LONG"` |
+| `OrderType` | `"Market"` or `"Limit"` | `"Market"` |
+| `PriceRange` | no default — always caller-supplied | — |
+| `Select` | the option's `value` | `0` |
+
+**Full example with typed params:**
+```json
+"signal_actions": [
+  {
+    "code": "Start",
+    "name": "Start the grid",
+    "description": "Open a grid position on the given symbol",
+    "params": [
+      { "name": "Grid price range", "code": "grid_price_range", "variant": "PriceRange" },
+      { "name": "Grid quantity",    "code": "grid_quantity",    "variant": "Number" },
+      { "name": "Side",             "code": "side",             "variant": "Direction", "default": "LONG" },
+      {
+        "name": "Grid mode",
+        "code": "grid_mode",
+        "variant": "Select",
+        "default": 0,
+        "options": [
+          { "label": "Arithmetic", "value": 0.0 },
+          { "label": "Geometric",  "value": 1.0 }
+        ]
+      }
+    ]
+  }
+]
+```
+
 Trigger via `run_bot_group_action`:
 ```json
-{ "bot_group_id": 20, "code": "start", "symbol_key": "OKX#BTC-USDT-SWAP", "price": 45000.0 }
+{
+  "bot_group_id": 20,
+  "code": "Start",
+  "symbol_key": "OKX#BTC-USDT-SWAP",
+  "price": 45000.0,
+  "direction": "LONG",
+  "values": {
+    "grid_price_range_lower": 44000.0,
+    "grid_price_range_upper": 46000.0,
+    "grid_quantity": 200.0,
+    "side": "LONG",
+    "grid_mode": 0.0
+  }
+}
 ```
 
 ### `on_actions` — per-bot in-position trigger
