@@ -1,6 +1,7 @@
 use lte_strategy_bridge::abi::{
     Direction, ModuleEvent, ModuleInput, ModuleOpenPosition, ModuleOutput, ModulePlaceOrder,
 };
+use lte_strategy_bridge::{IndicatorField, IndicatorFieldKey, IndicatorKey, TimeframeSec};
 
 use crate::state::State;
 
@@ -34,6 +35,46 @@ pub fn run(input: &ModuleInput, state: &mut State) -> ModuleOutput {
     state.ticks += 1;
 
     match &input.event {
+        // ── Initialisation ────────────────────────────────────────────────────
+        // Seed the local indicator cache from the full 10-candle history sent by
+        // the host on bridge startup.  No trading action is taken here.
+        ModuleEvent::Init => {
+            state.indicators.init(&input.indicators);
+            ModuleOutput {
+                debug: format!("init ticks={}", state.ticks),
+                ..Default::default()
+            }
+        }
+
+        // ── Candle close ──────────────────────────────────────────────────────
+        // The host sends only the latest candle for each updated timeframe.
+        // Merge it into the local cache, then evaluate entry conditions.
+        ModuleEvent::Indicators { timeframes } => {
+            state.indicators.update(&input.indicators, timeframes);
+
+            // Example: read EMA 200 on the 1-hour chart from the cache.
+            let _ema200 = state.indicators.get(IndicatorFieldKey {
+                timeframe: TimeframeSec::Tf1h,
+                indicator: IndicatorKey::Ema200,
+                field: IndicatorField::Value,
+            });
+
+            // Example: compare current vs. previous candle value.
+            let _ema200_prev = state.indicators.get_prev(
+                IndicatorFieldKey {
+                    timeframe: TimeframeSec::Tf1h,
+                    indicator: IndicatorKey::Ema200,
+                    field: IndicatorField::Value,
+                },
+                1, // 1 = one candle back
+            );
+
+            ModuleOutput {
+                debug: format!("indicators tf={timeframes:?} ticks={}", state.ticks),
+                ..Default::default()
+            }
+        }
+
         // ── Position closed ───────────────────────────────────────────────────
         // Cancel any unfilled DCA orders for the closed direction.
         ModuleEvent::FinishPosition { direction, pnl } => {
@@ -65,6 +106,8 @@ pub fn run(input: &ModuleInput, state: &mut State) -> ModuleOutput {
         }
 
         // ── Tick / signal ─────────────────────────────────────────────────────
+        // Use state.indicators (kept current by Init + Indicators events) to
+        // evaluate entry conditions.  No indicator data is sent on Signal events.
         // Replace the stubs below with your real indicator conditions.
         // Entry uses a LIMIT order so slippage is controlled.
         ModuleEvent::Signal => {

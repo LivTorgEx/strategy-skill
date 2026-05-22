@@ -1,6 +1,11 @@
+use lte_strategy_bridge::IndicatorHistory;
+
 #[derive(Debug, serde::Serialize, serde::Deserialize, Default)]
 pub struct State {
     pub ticks: u64,
+    /// Local indicator cache — rebuilt from Init/Indicators events, not persisted.
+    #[serde(skip)]
+    pub indicators: IndicatorHistory,
 }
 
 pub fn load(v: Option<&serde_json::Value>) -> State {
