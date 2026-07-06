@@ -519,6 +519,7 @@ subsequent ticks.
 | `enter_price` | `f64` | — | Limit price for the order |
 | `take_profit` | `Option<f64>` | `None` | TP attached to this order |
 | `stop_loss` | `Option<f64>` | `None` | SL attached to this order |
+| `note` | `Option<String>` | `None` | Human-readable note logged by the bridge; omit it to leave the host note empty |
 | `mark` | `String` | — | Stable unique identifier — used to upsert/cancel by the host |
 | `order_side` | `ModuleOrderSide` | `Buy` | Exchange order side: `Buy` for entries/DCA, `Sell` to reduce a Long, `Buy` to reduce a Short |
 | `reduce_only` | `bool` | `false` | When `true`, only applied to an already-open position. Never buffered — silently dropped if no position is open. Use for all partial-close orders |
@@ -544,6 +545,7 @@ ModulePlaceOrder {
     enter_price: target_price,
     take_profit: None,
     stop_loss: None,
+    note: Some("tp-partial-1".to_string()),
     mark: "tp-partial-1".to_string(),
     order_side: ModuleOrderSide::Sell,
     reduce_only: true,           // REQUIRED for partial-close orders
