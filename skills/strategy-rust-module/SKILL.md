@@ -398,7 +398,7 @@ Discriminated union (serde `snake_case` tag). Tells the module what triggered th
 | `signal` | *(none)* | Signal event |
 | `new_position` | `direction: Direction, entry_price: f64, qty: f64` | A position was opened on the exchange |
 | `finish_position` | `direction: Direction, pnl: f64` | A position was closed |
-| `order_update` | `direction: Direction, order_side: String, role: OrderRole, status: String, fill_price: f64, filled_qty: f64` | An order's status changed on the exchange |
+| `order_update` | `direction: Direction, order_side: ModuleExchangeOrderSide, role: OrderRole, status: ModuleOrderStatus, fill_price: f64, filled_qty: f64` | An order's status changed on the exchange |
 | `action` | `name: String, values: HashMap<String, Value>` | User-triggered named action from the UI. `values` carries any parameters; empty for parameter-less actions |
 
 ---
@@ -471,7 +471,7 @@ Written to stdout as a single JSON line. The bridge reads this to execute tradin
 | `amount` | `Option<f64>` | `None` | Position size in USD. Provide either `amount` or `qty` |
 | `qty` | `Option<f64>` | `None` | Position size in contracts/coins. Provide either `amount` or `qty` |
 | `enter_price` | `Option<f64>` | `None` | Limit entry price. `None` = market order |
-| `order_type` | `String` | `"Market"` | Order type (`"Market"`, `"Limit"`, `"StopMarket"`) |
+| `order_type` | `ModuleOrderType` | `Market` | Order type (`Market`, `Limit`) |
 | `take_profit` | `Option<f64>` | `None` | TP price |
 | `stop_loss` | `Option<f64>` | `None` | SL price |
 | `note` | `String` | — | Human-readable note (logged by the bridge) |
@@ -686,6 +686,8 @@ pub enum ModuleIndicatorValue {
 }
 ```
 
+`ModuleIndicatorValue::String` is for indicator-specific discrete states. Use `value.as_str()` and then `parse::<YourEnum>()` or match on the raw string when you need a typed value.
+
 ### ModuleIndicatorCross
 
 ```rust
@@ -741,6 +743,21 @@ let key = IndicatorFieldKey {
 
 if let Some(ModuleIndicatorValue::Float(rsi)) = get_value(&input.indicators, key) {
     // use rsi value
+}
+```
+
+### String-backed indicator values
+
+```rust
+use std::str::FromStr;
+use lte_strategy_bridge::abi::{ModuleIndicatorValue, ModuleOrderStatus};
+
+if let Some(value) = get_value(&input.indicators, key) {
+    if let Some(raw) = value.as_str() {
+        if let Ok(status) = ModuleOrderStatus::from_str(raw) {
+            // use typed status
+        }
+    }
 }
 ```
 
