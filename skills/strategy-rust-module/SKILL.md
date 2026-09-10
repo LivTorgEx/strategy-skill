@@ -225,8 +225,7 @@ Each module record has `skill_access`: `"Edit"` (can upload), `"Read"` (list onl
   with `build_output` = `"build timed out"`.
 - `build_output` is capped at 32 KB.
 - `create_module_repository`, `get_module_upload_url`, and `submit_module_build` are write-scoped tools.
-  The server admin must include them in `MCP_ALLOWED_WRITE_TOOLS` for them to
-  appear as enabled in the tool list.
+  They are available to clients that hold the `mcp:write` scope.
 
 ---
 
