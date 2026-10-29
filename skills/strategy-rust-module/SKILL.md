@@ -398,6 +398,7 @@ Passed to the WASM module via stdin on every tick.
 |-------|------|-------------|
 | `event` | `ModuleEvent` | What triggered this tick |
 | `price` | `f64` | Current market price |
+| `market_decision` | `Option<ModuleMarketDecision>` | Market snapshot on `market_decision` events; `None` on other events |
 | `symbol` | `String` | Trading pair (e.g. `"BTC-USDT-SWAP"`) |
 | `max_amount` | `f64` | Base max position size in USD (from bot group settings) |
 | `auto_max_amount` | `f64` | Effective max after auto-reinvest compounding: `max_amount + realised_pnl * reinvest_percent * leverage`. Falls back to `max_amount` when no PnL accumulated. See **Auto-Reinvest** below |
@@ -405,7 +406,6 @@ Passed to the WASM module via stdin on every tick.
 | `symbol_info` | `ModuleSymbolInfo` | Trading rules for the symbol (tick size, lot size, minimums) |
 | `indicators` | `BTreeMap<i64, Vec<HashMap<String, HashMap<String, ModuleIndicatorValue>>>>` | Indicator data keyed by timeframe in seconds. See **Indicator Access** below |
 | `positions` | `ModulePositions` | Current open positions summary |
-| `sug_info` | `Option<SuggestionInfo>` | Real-time projection/suggestion data (present on `SugInfo` events) |
 | `state` | `Option<serde_json::Value>` | On first event after restart: restored from DB (last persisted `ModuleOutput.state`). Otherwise `None` — use in-memory Rust state for normal operation |
 
 ---
@@ -416,13 +416,37 @@ Discriminated union (serde `snake_case` tag). Tells the module what triggered th
 
 | Variant | Fields | Description |
 |---------|--------|-------------|
-| `sug_info` | *(none)* | Trade-driven real-time update (~1s when trades are active, variable rate). `input.sug_info` is populated |
+| `market_decision` | *(none)* | A public market snapshot is available in `input.market_decision` |
 | `indicators` | `timeframes: Vec<i64>` | Indicator candles updated for the listed timeframe(s) |
-| `signal` | *(none)* | Signal event |
+| `signal` | `direction`, `code`, `values` | Signal action event |
 | `new_position` | `direction: Direction, entry_price: f64, qty: f64` | A position was opened on the exchange |
 | `finish_position` | `direction: Direction, pnl: f64` | A position was closed |
 | `order_update` | `direction: Direction, order_side: ModuleExchangeOrderSide, role: OrderRole, status: ModuleOrderStatus, fill_price: f64, filled_qty: f64` | An order's status changed on the exchange |
 | `action` | `name: String, values: HashMap<String, Value>` | User-triggered named action from the UI. `values` carries any parameters; empty for parameter-less actions |
+
+---
+
+## MarketDecision
+
+The host sends a `market_decision` event when a new market snapshot is ready.
+Read it from `input.market_decision`; it is `None` for other event types.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `time` | `i64` | Market event timestamp in milliseconds |
+| `system_time` | `i64` | Host timestamp in milliseconds |
+| `symbol_key` | `String` | Exact platform symbol key |
+| `price` | `f64` | Latest trade price |
+| `candle` | `ModuleMarketCandle` | Current trade aggregation |
+| `fc` | `Option<ModuleMarketCandle>` | Optional fast aggregation |
+| `ntp_5s` | `i64` | Trade count in the recent five-second window |
+| `tdt` | `Option<i64>` | Optional trade-delta time value |
+| `order_book` | `Option<ModuleMarketOrderBook>` | Optional order-book snapshot |
+| `oi` | `Option<ModuleMarketOpenInterest>` | Optional open-interest snapshot |
+
+`ModuleMarketCandle` contains `min`, `max`, `enter`, `exit`, `qty`, `asset`,
+`qtym`, and `masset`. Order-book sides use `asks` and `bids`; each level has
+`price`, `quantity`, `total_amount`, `filled`, `time_start`, and `duration`.
 
 ---
 
@@ -583,112 +607,11 @@ ModulePlaceOrder {
 
 ---
 
-## SuggestionInfo (projection data)
-
-Present in `ModuleInput.sug_info` when `event` is `sug_info`.
-
-**`sug_info` is NOT a fixed-interval tick** — it is driven by real trades arriving from the exchange. The projection engine (`worker_projection`) receives trades via gRPC, updates candle aggregation and NTPS counters, and emits a `SuggestionInfo` message via gRPC approximately every **~1 second** — but only when at least one trade has arrived. **If no trades arrive from the exchange, no `sug_info` is emitted** and the module simply waits.
-
-**NTPS and FastTrade mode:**
-- **NTPS** (Number of Trades Per 3 Seconds) measures real-time trading activity — the average number of exchange trades in a rolling 3-second window.
-- When NTPS exceeds a threshold, the projection enables **FastTrade** status (`status: "FastTrade"`), increasing `sug_info` emission frequency for more responsive trading.
-- During **Normal** status, updates arrive roughly once per second.
-- During **low activity** (few or no trades), updates are less frequent — the system waits for the next trade.
-
-This makes `sug_info` your primary real-time data feed for reactive strategies. The variable rate means your module receives more events during volatile markets and fewer during quiet periods — naturally matching market activity.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `time` | `i64` | Timestamp (ms) |
-| `system_time` | `i64` | Server system time (ms) |
-| `symbol_key` | `String` | Symbol key (e.g. `"OKX#BTC-USDT-SWAP#SWAP"`) |
-| `status` | `AlgoSuggestionTradeStatus` | `"Normal"` or `"FastTrade"` |
-| `price` | `f64` | Current price |
-| `candle` | `SuggestionInfoCandle` | Current candle data for the sug info timeframe |
-| `klines` | `HashMap<i64, SuggestionKline>` | Kline data keyed by timeframe (seconds) |
-| `fast_candle` | `Option<SuggestionInfoCandle>` | Fast candle (aggregation while in fast-trade mode) |
-| `direction` | `Direction` | Current market direction |
-| `indicator` | `SuggestionInfoIndicator` | Projection-level indicator data |
-| `order_book` | `Option<SuggestionInfoOrderBook>` | Order book snapshot |
-| `oi` | `Option<SuggestionInfoOpenInterest>` | Open interest data |
-
-### SuggestionInfoCandle
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `min` | `f64` | Candle low |
-| `max` | `f64` | Candle high |
-| `enter` | `f64` | Candle open |
-| `exit` | `f64` | Candle close |
-| `qty` | `f64` | Total trade quantity |
-| `qty_asset` | `f64` | Total trade quantity in asset |
-| `qtym` | `f64` | Market-order quantity |
-| `qtym_asset` | `f64` | Market-order quantity in asset |
-
-### SuggestionKline
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `low` | `f64` | Kline low |
-| `high` | `f64` | Kline high |
-| `open` | `f64` | Kline open |
-| `close` | `f64` | Kline close |
-
-### SuggestionInfoOrderBook
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `long_levels` | `Vec<SuggestionInfoOrderBookLevel>` | Bid side levels |
-| `short_levels` | `Vec<SuggestionInfoOrderBookLevel>` | Ask side levels |
-| `sell_amount` | `f64` | Total sell-side amount |
-| `sell_price` | `Option<f64>` | Best ask price |
-| `buy_amount` | `f64` | Total buy-side amount |
-| `buy_price` | `Option<f64>` | Best bid price |
-
-### SuggestionInfoOrderBookLevel
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `price` | `f64` | Price level |
-| `quantity` | `f64` | Quantity at this level |
-| `total_amount` | `f64` | Total notional amount to that level |
-| `filled` | `Option<f64>` | Fill ratio (0.0–1.0) |
-| `time_start` | `i64` | When this level appeared (ms) |
-| `duration` | `i64` | How long this level has existed (ms) |
-
-### SuggestionInfoOpenInterest
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `usd` | `f64` | Open interest in USD |
-| `change` | `f64` | OI change (percentage) |
-| `change_qty` | `f64` | OI change (absolute) |
-| `avg` | `f64` | Average OI |
-
-### SuggestionInfoIndicator
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `ntps` | `i64` | Average number of trades per 3 seconds |
-| `ntps_fast_time` | `Option<i64>` | Fast-trade mode trigger time |
-| `trandm` | `f64` | Buy/Sell performance during the last 9 days that can be from -100% to +100%. Oversold/Overbought conditions are indicated by extreme values. |
-| `asset_01` | `f64` | Asset value per 1% of TrandM |
-| `price_1h` | `f64` | Price change % over 1h |
-| `price_4h` | `f64` | Price change % over 4h |
-| `price_8h` | `f64` | Price change % over 8h |
-| `price_24h` | `f64` | Price change % over 24h |
-
-### AlgoSuggestionTradeStatus
-
-```rust
-pub enum AlgoSuggestionTradeStatus { Normal, FastTrade }
-```
-
 ---
 
 ## Indicator Access
 
-Indicator events fire **when a candle closes** on one or more timeframes — this is event-driven from the projection engine, not polled. The projection detects a candle close (e.g. the 1-minute candle at 14:01:00), computes all configured indicators, and broadcasts the results. The bridge reads the latest snapshots from `GlobalStorage` (shared in-memory store that keeps a rolling window of **10 candles** per timeframe) and includes them in every `ModuleInput`.
+Indicator events fire **when a candle closes** on one or more timeframes — this is event-driven, not polled. The host computes configured indicators and includes the latest snapshots from its shared in-memory store (a rolling window of **10 candles** per timeframe) in `ModuleInput`.
 
 Indicators are delivered in `ModuleInput.indicators` as a nested map:
 `BTreeMap<timeframe_seconds, Vec<candle_map>>` where each `candle_map` is
@@ -696,7 +619,7 @@ Indicators are delivered in `ModuleInput.indicators` as a nested map:
 
 The first element (`[0]`) is always the most recent candle. Up to 10 historical candles are available per timeframe, allowing lookback-based logic without maintaining your own candle history.
 
-When `event` is `{"indicators": {"timeframes": [60, 300]}}`, the `timeframes` array tells you which timeframes just had a candle close. Note: indicators are also present on `sug_info` events (the latest cached values), so your module always has access to the most recent indicator data regardless of event type.
+When `event` is `{"indicators": {"timeframes": [60, 300]}}`, the `timeframes` array tells you which timeframes just had a candle close.
 
 ### ModuleIndicatorValue
 
