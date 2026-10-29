@@ -1,17 +1,17 @@
 ---
 name: strategy-rust-module
 description: >
-  Create, build, and deploy a Rust WASM DynamicModule strategy to a LivTorgEx server.
+  Create, locally build, upload, and attach a Rust WASM module to a LivTorgEx strategy-version leg.
   Use when the user asks to create a new WASM-based strategy module, scaffold a Rust strategy,
-  build a WASM binary, upload a module, or configure a bot group with DynamicModule settings.
+  build a WASM binary, upload a module, or attach a module to a QuantFlow strategy leg.
 ---
 
-# LivTorgEx — Rust WASM Dynamic Module
+# LivTorgEx — Rust WASM strategy module
 
 ## Overview
 
-A DynamicModule strategy is a WASM binary compiled from Rust. The platform
-spawns a **persistent WASM instance** at bot startup — the module runs a
+A Rust WASM module is a pinned strategy-leg capability. The platform starts a
+**persistent WASM instance** with the bot — the module runs a
 stdin/stdout loop (`lte_strategy_bridge::run_loop`) and stays alive for the
 bot's entire lifetime. The bridge feeds events as JSON lines to stdin and reads
 responses from stdout. State lives in the module's memory (plain Rust variables)
@@ -21,14 +21,14 @@ Each bot runs as a **tokio task** (green thread), not an OS thread — this scal
 to 10k+ bots on a single machine. Between events the module yields to the
 runtime (zero CPU while idle).
 
-The full lifecycle is:
+The active strategy-leg lifecycle is:
 1. Create a **module repository** (gets a `module_id` UUID).
 2. Write Rust strategy code using `lte_strategy_bridge::run_loop`.
-3. Package source as a `.tar.gz`.
-4. **Get a presigned upload URL** and **upload the archive to S3**.
-5. **Submit a build** — the server validates the upload and queues compilation.
-6. **Poll for build status** — on failure, read `build_output` compiler errors, fix, and re-submit.
-7. On success, deploy the module version to a bot group.
+3. Build the WASM locally and upload the binary with the prebuilt-WASM MCP tools.
+4. Pin the resulting successful `build_id` to a strategy-version leg with a matching QuantFlow `module.start` alias.
+5. Explicitly release the pre-release strategy version when the leg is ready.
+
+Local builds are recommended when Rust source should stay on the developer's machine. The source-archive/server-build flow remains available as an alternative.
 
 ---
 
@@ -80,7 +80,24 @@ See the **ABI Reference** section below for full type documentation.
 
 ---
 
-### Step 3 — Package source
+### Recommended — build and upload WASM locally
+
+Install the WASI target and compile the artifact on the development machine:
+
+```bash
+rustup target add wasm32-wasip1
+cargo build --target wasm32-wasip1 --release
+```
+
+The artifact is normally `target/wasm32-wasip1/release/<crate-name>.wasm`. Call `get_module_wasm_upload_url` with the repository `module_id` and `module_version`, PUT the artifact to the returned URL, then call `submit_module_wasm` with the same identifiers. This sends the compiled binary only; it does not upload Rust source or invoke the server builder. The tool returns a successful build record and its `build_id`.
+
+```bash
+curl -fS -X PUT -T target/wasm32-wasip1/release/<crate-name>.wasm "$UPLOAD_URL"
+```
+
+The upload limit is 32 MiB. The module version must be 1–64 characters from `[A-Za-z0-9._-]`.
+
+### Optional — build on the server from a source archive
 
 The project **must** be a valid Cargo workspace or single-crate project.
 The builder runs `cargo build --target wasm32-wasip1 --release` inside it.
@@ -97,7 +114,8 @@ Package the project root:
 
 ```bash
 # From the directory that contains Cargo.toml:
-tar --exclude=./target --exclude=./.git -czf /tmp/module-src.tar.gz .
+mkdir -p dist
+tar --exclude=./target --exclude=./.git -czf dist/module-src.tar.gz .
 ```
 
 Keep the source under **1 MB** (compressed). Remove large test fixtures or generated
@@ -123,7 +141,7 @@ Returns `upload_url` (valid for 5 minutes) and `expires_in`.
 **4b.** Upload the archive directly to S3:
 
 ```bash
-curl -X PUT -T /tmp/module-src.tar.gz "$UPLOAD_URL"
+curl -X PUT -T dist/module-src.tar.gz "$UPLOAD_URL"
 ```
 
 The binary goes directly from disk to S3 — no base64 encoding, no JSON serialization.
@@ -172,41 +190,48 @@ Arguments: `{ "module_id": "<UUID>" }`
 
 ---
 
-### Step 7 — Deploy to a bot group
+### Step 7 — Attach the build to a strategy-version leg
 
-Once build status is `Success`, use `upsert_bot_group` (see `create-strategy` skill).
-Set the `settings.strategy` block to:
+Use `list_strategies` to select the owned `strategy_id`. Call `create_strategy_version` to add a leg to a new pre-release version, or `update_strategy_version_leg` to edit an existing unreleased leg. Put the alias declaration in the leg's QuantFlow source and pin the successful build ID in `modules`:
+
+The following object is one item in `create_strategy_version.legs`:
 
 ```json
 {
-  "name": "DynamicModule",
-  "module_id": "<UUID>",
-  "module_version": "0.1.0",
-  "max_open_amount": 500.0,
-  "reinvest_percent": 1.0,
-  "direction": "BOTH"
+  "leg_key": "eth_power",
+  "name": "ETH Power",
+  "provider_code": "<provider code>",
+  "program": {
+    "schema": "quantflow_bot_v1",
+    "program": "module.start(\"eth_power\")"
+  },
+  "modules": [
+    {
+      "alias": "eth_power",
+      "module_build_id": "<successful build_id>"
+    }
+  ]
 }
 ```
 
-`direction` options: `"BOTH"`, `"Long"`, `"Short"`.
-`reinvest_percent`: fraction of realised profit to reinvest (0.0–1.0, default 1.0). See **Auto-Reinvest**.
+`module.start` must be a top-level statement. Aliases must be unique, lowercase, start with a letter, and contain only lowercase letters, digits, or underscores (maximum 64 characters). The `modules` aliases must exactly match all `module.start` declarations in that leg's program. `module_build_id` is the ID returned by `submit_module_wasm` or `list_module_builds`, not the repository ID or version string. The build must have status `Success` and belong to the strategy owner.
+
+When updating an existing leg, omit `modules` to preserve its current bindings. If changing any `module.start` aliases, pass the complete new `program` and `modules` array together. Pass `modules: []` to clear all bindings and remove all `module.start` declarations. Use `get_strategy` to verify the leg's `program` and bindings, then call `release_strategy_version` when ready; released versions are immutable.
 
 ---
 
-## Re-deploying an updated module
+## Updating a pinned module
 
-1. Fix the Rust source.
-2. Re-package, re-upload, and re-submit (Steps 3–5) with a **new version string** (e.g. `0.2.0`).
-3. Poll until `Success`.
-4. Update the bot group's `module_version` via `upsert_bot_group`.
+1. Update the Rust source and build a new WASM artifact locally.
+2. Upload and submit it with a new module version to get a new successful `build_id`.
+3. Create a new pre-release strategy version or update an unreleased leg to pin that build ID.
+4. Review and explicitly release the new version when ready.
 
 ---
 
-## skill_access
+## MCP access
 
-Each module record has `skill_access`: `"Edit"` (can upload), `"Read"` (list only),
-`"Deny"` (blocked). HTTP 403 → user must set it to `"Edit"` in
-**Account → Skill → Module Access**.
+The module repository and strategy leg must belong to the authenticated user. Repository creation, upload URL generation, upload submission, and leg edits require the MCP `mcp:write` scope.
 
 ---
 
@@ -220,12 +245,11 @@ Each module record has `skill_access`: `"Edit"` (can upload), `"Read"` (list onl
   and all subsequent events for that bot will fail.
 - Use a stable `mark` string per logical entry (e.g. `"long-dca-t2"`) so the bridge
   can upsert/cancel orders idempotently.
-- Keep `module_version` pinned in production; use `"latest"` only during development.
+- Strategy legs pin an exact `module_build_id`; they never resolve a floating `latest` build.
 - Build timeout: 240 seconds. If the build times out, status will be `Failed`
   with `build_output` = `"build timed out"`.
 - `build_output` is capped at 32 KB.
-- `create_module_repository`, `get_module_upload_url`, and `submit_module_build` are write-scoped tools.
-  They are available to clients that hold the `mcp:write` scope.
+- Both local WASM upload tools and source-archive build tools require the MCP `mcp:write` scope.
 
 ---
 

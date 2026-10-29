@@ -1,13 +1,15 @@
-# LivTorgEx Strategy Skill
+# LivTorgEx Strategy Skills
 
-A Claude Code plugin that lets your AI agent design and deploy trading bot group strategies directly to a LivTorgEx server.
+A Claude Code plugin with guidance for classic bot groups and versioned
+strategy-version legs. Rust WASM modules can be built locally, uploaded as
+precompiled artifacts, and pinned to a leg through its QuantFlow program.
 
 ## Two solutions
 
-This repository now documents two ways to create strategy implementations:
+This repository documents these strategy paths:
 
-1. Strategy settings JSON (skill-driven): [solutions/strategy-settings/README.md](solutions/strategy-settings/README.md)
-2. Rust WASM DynamicModule implementation: [solutions/strategy-rust-module/README.md](solutions/strategy-rust-module/README.md)
+1. Classic bot-group settings JSON: [solutions/strategy-settings/README.md](solutions/strategy-settings/README.md)
+2. Rust WASM modules pinned to versioned strategy legs: [solutions/strategy-rust-module/README.md](solutions/strategy-rust-module/README.md)
 
 Repository layout:
 
@@ -17,13 +19,17 @@ Repository layout:
 
 ## What it does
 
-When you ask Claude to create a strategy, it will:
+For a classic bot-group request, the skill will:
 
 1. Fetch your API keys and existing bot groups from the server
 2. Ask for any missing settings (indicators, timeframe, direction, TP/SL, leverage, etc.)
 3. Generate a valid `BotGroupSetting` JSON
 4. Validate it against the server
 5. Create or update the bot group
+
+For a versioned strategy leg, use the strategy-version MCP tools. The leg's
+QuantFlow program declares each WASM module with `module.start("alias")`, and
+its `modules` array binds that alias to a successful `module_build_id`.
 
 ## Installation
 
@@ -102,7 +108,8 @@ Claude will build the JSON and deploy it.
 
 | Skill | Description |
 |-------|-------------|
-| `create-strategy` | Full workflow: fetch context → build JSON → validate → deploy |
+| `create-strategy` | Classic bot-group workflow: fetch context → build JSON → validate → deploy |
+| `strategy-rust-module` | Build/upload Rust WASM and bind a pinned build to a versioned strategy leg |
 | `strategy-indicators` | All 24 indicator types with correct fields and properties |
 | `strategy-conditions` | Filter, value, and action syntax reference |
 | `strategy-on-actions` | `on_analysis`, `on_indicators`, `on_actions` patterns and variables |
