@@ -1,7 +1,9 @@
 use lte_strategy_bridge::abi::{
-    Direction, ModuleEvent, ModuleInput, ModuleOpenPosition, ModuleOutput, ModulePlaceOrder,
+    Direction, ModuleDataRequirements, ModuleEvent, ModuleInput, ModuleOpenPosition, ModuleOutput,
+    ModulePlaceOrder,
 };
-use lte_strategy_bridge::{IndicatorField, IndicatorFieldKey, IndicatorKey, TimeframeSec};
+use lte_strategy_bridge::{InternalIndicator, InternalIndicatorKind, MODULE_ABI_VERSION};
+use std::collections::BTreeMap;
 
 use crate::state::State;
 
@@ -32,48 +34,78 @@ const DCA2_SHORT: &str = "dca2-short";
 
 /// Core strategy logic.
 pub fn run(input: &ModuleInput, state: &mut State) -> ModuleOutput {
-    state.ticks += 1;
+    if !matches!(&input.event, ModuleEvent::Requirements) {
+        state.ticks += 1;
+    }
 
     match &input.event {
+        // Declare only the history this module needs. The host validates the
+        // request, loads it once, then sends Init followed by incremental updates.
+        ModuleEvent::Requirements => ModuleOutput {
+            data_requirements: ModuleDataRequirements {
+                abi_version: MODULE_ABI_VERSION,
+                klines: BTreeMap::from([(60, 200), (300, 200)]),
+                internal_indicators: BTreeMap::from([(
+                    InternalIndicatorKind::Ntps,
+                    BTreeMap::from([(60, 10)]),
+                )]),
+            },
+            ..Default::default()
+        },
+
         // ── Initialisation ────────────────────────────────────────────────────
-        // Seed the local indicator cache from the full 10-candle history sent by
-        // the host on bridge startup.  No trading action is taken here.
+        // Seed the local candle cache from the requested history. No trading
+        // action is taken here.
         ModuleEvent::Init => {
-            state.indicators.init(&input.indicators);
+            state.klines.init(&input.klines);
             ModuleOutput {
-                debug: format!("init ticks={}", state.ticks),
+                debug: format!(
+                    "init klines_1m={} klines_5m={} ticks={}",
+                    state.klines.get(60).map_or(0, |rows| rows.len()),
+                    state.klines.get(300).map_or(0, |rows| rows.len()),
+                    state.ticks
+                ),
                 ..Default::default()
             }
         }
 
-        // ── Candle close ──────────────────────────────────────────────────────
-        // The host sends only the latest candle for each updated timeframe.
-        // Merge it into the local cache, then evaluate entry conditions.
-        ModuleEvent::Indicators { timeframes } => {
-            state.indicators.update(&input.indicators, timeframes);
+        ModuleEvent::KlineUpdate { timeframes } => {
+            state.klines.update(&input.klines);
+            let latest_1m = state.klines.get_prev(60, 0).map(|candle| candle.close);
+            ModuleOutput {
+                debug: format!(
+                    "kline update tf={timeframes:?} latest_1m={latest_1m:?} ticks={}",
+                    state.ticks
+                ),
+                ..Default::default()
+            }
+        }
 
-            // Example: read EMA 200 on the 1-hour chart from the cache.
-            let _ema200 = state.indicators.get(IndicatorFieldKey {
-                timeframe: TimeframeSec::Tf1h,
-                indicator: IndicatorKey::Ema200,
-                field: IndicatorField::Value,
+        ModuleEvent::InternalIndicators { timeframes } => {
+            let records = input
+                .internal_indicators
+                .iter()
+                .filter(|(timeframe, _)| timeframes.contains(timeframe))
+                .flat_map(|(_, records)| records.iter());
+            let (record_count, latest_ntps) = records.fold((0, None), |(count, latest), record| {
+                let ntps = match &record.indicator {
+                    InternalIndicator::Ntps { value, .. } => Some(*value),
+                };
+                (count + 1, ntps.or(latest))
             });
-
-            // Example: compare current vs. previous candle value.
-            let _ema200_prev = state.indicators.get_prev(
-                IndicatorFieldKey {
-                    timeframe: TimeframeSec::Tf1h,
-                    indicator: IndicatorKey::Ema200,
-                    field: IndicatorField::Value,
-                },
-                1, // 1 = one candle back
-            );
-
             ModuleOutput {
-                debug: format!("indicators tf={timeframes:?} ticks={}", state.ticks),
+                debug: format!(
+                    "internal indicators tf={timeframes:?} records={record_count} latest_ntps={latest_ntps:?}"
+                ),
                 ..Default::default()
             }
         }
+
+        // Dynamic module-requested indicators are a future feature.
+        ModuleEvent::Indicators { .. } => ModuleOutput {
+            debug: "dynamic indicators are not available yet".to_owned(),
+            ..Default::default()
+        },
 
         // ── Position closed ───────────────────────────────────────────────────
         // Cancel any unfilled DCA orders for the closed direction.
@@ -81,7 +113,10 @@ pub fn run(input: &ModuleInput, state: &mut State) -> ModuleOutput {
             let marks = dca_marks(*direction);
             ModuleOutput {
                 cancel_orders: marks.iter().map(|m| m.to_string()).collect(),
-                debug: format!("finish {:?} pnl={:.4} ticks={}", direction, pnl, state.ticks),
+                debug: format!(
+                    "finish {:?} pnl={:.4} ticks={}",
+                    direction, pnl, state.ticks
+                ),
                 ..Default::default()
             }
         }
@@ -110,7 +145,7 @@ pub fn run(input: &ModuleInput, state: &mut State) -> ModuleOutput {
         // evaluate entry conditions.  No indicator data is sent on Signal events.
         // Replace the stubs below with your real indicator conditions.
         // Entry uses a LIMIT order so slippage is controlled.
-        ModuleEvent::Signal => {
+        ModuleEvent::Signal { .. } => {
             let opens: Vec<ModuleOpenPosition> = Vec::new();
 
             // ── Long entry ────────────────────────────────────────────────────

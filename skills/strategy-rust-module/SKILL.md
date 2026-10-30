@@ -404,9 +404,48 @@ Passed to the WASM module via stdin on every tick.
 | `auto_max_amount` | `f64` | Effective max after auto-reinvest compounding: `max_amount + realised_pnl * reinvest_percent * leverage`. Falls back to `max_amount` when no PnL accumulated. See **Auto-Reinvest** below |
 | `leverage` | `i32` | Exchange leverage |
 | `symbol_info` | `ModuleSymbolInfo` | Trading rules for the symbol (tick size, lot size, minimums) |
-| `indicators` | `BTreeMap<i64, Vec<HashMap<String, HashMap<String, ModuleIndicatorValue>>>>` | Indicator data keyed by timeframe in seconds. See **Indicator Access** below |
+| `klines` | `ModuleKlineSnapshot` | Requested candle history on `init`; new or revised candles on `kline_update` |
+| `internal_indicators` | `ModuleInternalIndicatorSnapshot` | Typed platform indicator data. NTPS is currently supported; see **Internal Indicators** below |
+| `indicators` | `BTreeMap<i64, Vec<HashMap<String, HashMap<String, ModuleIndicatorValue>>>>` | Reserved for future dynamic indicators. Hosts currently leave it empty |
 | `positions` | `ModulePositions` | Current open positions summary |
 | `state` | `Option<serde_json::Value>` | On first event after restart: restored from DB (last persisted `ModuleOutput.state`). Otherwise `None` — use in-memory Rust state for normal operation |
+
+---
+
+## Data requirements
+
+Return `ModuleDataRequirements` from the `requirements` event. The host loads
+the requested history before sending `init`, then sends only incremental
+updates as data becomes available.
+
+```rust
+use lte_strategy_bridge::{InternalIndicatorKind, ModuleDataRequirements, MODULE_ABI_VERSION};
+use std::collections::BTreeMap;
+
+ModuleDataRequirements {
+    abi_version: MODULE_ABI_VERSION,
+    klines: BTreeMap::from([(60, 200), (300, 200)]),
+    internal_indicators: BTreeMap::from([(
+        InternalIndicatorKind::Ntps,
+        BTreeMap::from([(60, 10), (300, 10)]),
+    )]),
+}
+```
+
+Kline keys and internal-indicator timeframe keys are seconds; their values
+are requested history counts. Internal indicators use the fixed platform list
+and typed schemas. Dynamic, parameterized indicators such as MRC are a separate
+future feature and are not requested or emitted by the host today.
+
+## Internal Indicators
+
+`ModuleEvent::InternalIndicators { timeframes }` carries only new or revised
+records since the previous update for the listed timeframes. `input.internal_indicators`
+is keyed by timeframe and each record has a timestamp and a typed indicator
+value. `InternalIndicator::Ntps` currently provides `value`, `min`, and `max`.
+On `init`, the same field contains the requested recent history. Keep any
+additional rolling calculations in the module; the host bounds the delivered
+history to the requested count.
 
 ---
 
@@ -416,8 +455,12 @@ Discriminated union (serde `snake_case` tag). Tells the module what triggered th
 
 | Variant | Fields | Description |
 |---------|--------|-------------|
+| `requirements` | *(none)* | Return `ModuleDataRequirements` for the data this module needs |
+| `init` | *(none)* | Initial event with requested kline and internal-indicator history |
+| `kline_update` | `timeframes: Vec<i32>` | New or revised klines for requested timeframes |
 | `market_decision` | *(none)* | A public market snapshot is available in `input.market_decision` |
-| `indicators` | `timeframes: Vec<i64>` | Indicator candles updated for the listed timeframe(s) |
+| `internal_indicators` | `timeframes: Vec<i64>` | Incremental fixed platform indicator records in `input.internal_indicators` |
+| `indicators` | `timeframes: Vec<i64>` | Reserved for future dynamic indicators; the host does not emit it |
 | `signal` | `direction`, `code`, `values` | Signal action event |
 | `new_position` | `direction: Direction, entry_price: f64, qty: f64` | A position was opened on the exchange |
 | `finish_position` | `direction: Direction, pnl: f64` | A position was closed |
@@ -609,114 +652,11 @@ ModulePlaceOrder {
 
 ---
 
-## Indicator Access
+## Dynamic indicators
 
-Indicator events fire **when a candle closes** on one or more timeframes — this is event-driven, not polled. The host computes configured indicators and includes the latest snapshots from its shared in-memory store (a rolling window of **10 candles** per timeframe) in `ModuleInput`.
-
-Indicators are delivered in `ModuleInput.indicators` as a nested map:
-`BTreeMap<timeframe_seconds, Vec<candle_map>>` where each `candle_map` is
-`HashMap<indicator_name, HashMap<field_name, ModuleIndicatorValue>>`.
-
-The first element (`[0]`) is always the most recent candle. Up to 10 historical candles are available per timeframe, allowing lookback-based logic without maintaining your own candle history.
-
-When `event` is `{"indicators": {"timeframes": [60, 300]}}`, the `timeframes` array tells you which timeframes just had a candle close.
-
-### ModuleIndicatorValue
-
-```rust
-pub enum ModuleIndicatorValue {
-    Float(f64),
-    String(String),
-    Direction(Direction),
-    Cross(ModuleIndicatorCross),
-}
-```
-
-`ModuleIndicatorValue::String` is for indicator-specific discrete states. Use `value.as_str()` and then `parse::<YourEnum>()` or match on the raw string when you need a typed value.
-
-### ModuleIndicatorCross
-
-```rust
-pub enum ModuleIndicatorCross { Cross, Body, Shadow, No, Above, Below }
-```
-
-### Available timeframes
-
-| Constant | Seconds |
-|----------|---------|
-| `Tf1m` | `60` |
-| `Tf5m` | `300` |
-| `Tf15m` | `900` |
-| `Tf30m` | `1800` |
-| `Tf1h` | `3600` |
-| `Tf4h` | `14400` |
-
-### Available indicators and their properties
-
-**Do NOT hardcode indicator names or properties.** Each indicator has its own
-specific set of properties. Call the MCP tool `list_indicators` to get the
-authoritative list of indicator names, valid periods, and their exact property
-names. The map key in `ModuleInput.indicators` is `lowercase_name` + `_` + `period`
-(e.g. `rsi_14`, `ema_200`, `bb_20`, `stoch_14,1,3`). Indicators without a
-period use just the lowercase name (e.g. `psar`, `supertrend`, `candle`).
-
-Example `list_indicators` response (truncated):
-```json
-[
-  {"name":"Rsi","period":["14"],"properties":["Value"]},
-  {"name":"Ema","period":["9","20","21","26","200"],"properties":["Direction","Value"]},
-  {"name":"BollingerBands","period":["20"],"properties":["Average","Upper","Lower"]},
-  {"name":"Candle","properties":["Direction","BodyChange","Open","Close","High","Low"]}
-]
-```
-
-The `properties` array lists the exact field names you can use as keys in the
-inner `HashMap<String, ModuleIndicatorValue>`. Using a property name not in
-that list will return `None`.
-
-### Helper: `get_value()`
-
-```rust
-use lte_strategy_bridge::indicator_access::{
-    get_value, IndicatorFieldKey, IndicatorKey, IndicatorField, TimeframeSec,
-};
-
-let key = IndicatorFieldKey {
-    timeframe: TimeframeSec::Tf1h,
-    indicator: IndicatorKey::Rsi14,
-    field: IndicatorField::Value,
-};
-
-if let Some(ModuleIndicatorValue::Float(rsi)) = get_value(&input.indicators, key) {
-    // use rsi value
-}
-```
-
-### String-backed indicator values
-
-```rust
-use std::str::FromStr;
-use lte_strategy_bridge::abi::{ModuleIndicatorValue, ModuleOrderStatus};
-
-if let Some(value) = get_value(&input.indicators, key) {
-    if let Some(raw) = value.as_str() {
-        if let Ok(status) = ModuleOrderStatus::from_str(raw) {
-            // use typed status
-        }
-    }
-}
-```
-
-### Manual access pattern
-
-```rust
-if let Some(candles) = input.indicators.get(&3600) {  // 1h timeframe
-    if let Some(first_candle) = candles.first() {
-        if let Some(fields) = first_candle.get("rsi_14") {
-            if let Some(ModuleIndicatorValue::Float(rsi)) = fields.get("Value") {
-                // use rsi value
-            }
-        }
-    }
-}
-```
+`ModuleEvent::Indicators` and `ModuleInput.indicators` are reserved for a future
+feature that lets modules request parameterized indicators. The host does not
+emit this event or provide this data today. For private TA calculations,
+request klines and calculate indicators inside the module. For the fixed
+platform NTPS indicator, request `InternalIndicatorKind::Ntps` and consume
+`InternalIndicators` updates as described above.
