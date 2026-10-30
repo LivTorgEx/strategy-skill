@@ -89,7 +89,9 @@ rustup target add wasm32-wasip1
 cargo build --target wasm32-wasip1 --release
 ```
 
-The artifact is normally `target/wasm32-wasip1/release/<crate-name>.wasm`. Call `get_module_wasm_upload_url` with the repository `module_id` and `module_version`, PUT the artifact to the returned URL, then call `submit_module_wasm` with the same identifiers. This sends the compiled binary only; it does not upload Rust source or invoke the server builder. The tool returns a successful build record and its `build_id`.
+The artifact is normally `target/wasm32-wasip1/release/<crate-name>.wasm`. Call `get_module_wasm_upload_url` with the repository `module_id` and `module_version`, PUT the artifact to the returned URL, then call `submit_module_wasm` with the same identifiers. This sends the compiled binary only; it does not upload Rust source or invoke the server builder. Every submission creates an immutable build revision, including when you reuse an existing version label. The result returns the new `build_id`.
+
+To update a module while keeping its version label, repeat this upload flow with the same `module_version`. Use `list_module_builds` to find the newest successful revision and its build ID. Existing strategy legs remain pinned to their current build; update the leg's `module_build_id` explicitly to adopt the new revision.
 
 ```bash
 curl -fS -X PUT -T target/wasm32-wasip1/release/<crate-name>.wasm "$UPLOAD_URL"
@@ -187,6 +189,8 @@ re-package (Step 3), re-upload (Step 4), and submit a new build (Step 5) with th
 To see all builds for a module:
 Call MCP tool: `list_module_builds`
 Arguments: `{ "module_id": "<UUID>" }`
+
+The result lists revisions newest first and includes each revision number and immutable `build_id`.
 
 ---
 
