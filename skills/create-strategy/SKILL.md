@@ -14,7 +14,7 @@ its QuantFlow source and binds that alias to a successful `module_build_id`.
 
 ### Step 1 — Fetch account context
 
-Call MCP tool: `list_api_keys`
+Call MCP tool: `list_credentials`
 Call MCP tool: `list_bot_groups`
 
 Present API keys by name. Warn if target bot group has `skill_access: "Read"` or `"Deny"`.
@@ -49,7 +49,7 @@ Arguments:
 ```json
 {
   "name": "<BOT_GROUP_NAME>",
-  "api_key_id": <ID from list_api_keys>,
+  "api_key_id": <ID from list_credentials>,
   "margin_mode": "Isolated",
   "margin_leverage": 20,
   "margin": 500.0,
