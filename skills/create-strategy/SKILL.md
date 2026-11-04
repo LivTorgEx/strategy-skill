@@ -9,6 +9,9 @@ This guide covers classic bot-group settings. For a versioned strategy with
 legs and pinned Rust WASM modules, use the MCP strategy-version tools and read
 the `strategy-rust-module` skill. A leg declares `module.start("alias")` in
 its QuantFlow source and binds that alias to a successful `module_build_id`.
+For bot metrics consumed by a workflow, have the module return
+`ModuleOutput.workflow_report` and configure a `bot.runtime.report` event
+trigger in the workflow.
 
 ## Workflow
 

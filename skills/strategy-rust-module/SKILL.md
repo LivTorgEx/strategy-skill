@@ -286,6 +286,31 @@ fn run(input: &ModuleInput, state: &mut State) -> ModuleOutput {
 - `input.state` is only non-`None` on the first event after a restart — use in-memory state for normal operation.
 - `output.state` is written to DB every ~80s — keep it small (avoid large arrays or history buffers).
 - `output.debug` is saved in the bot context for user tracing — put human-readable strategy status here.
+- `output.workflow_report` is sent to the owning strategy worker as a `bot.runtime.report` event. It is not saved in bot context and is not restored after restart.
+
+## Strategy workflow reports
+
+Use `ModuleOutput.workflow_report` to publish values that a strategy workflow
+can compare or use in conditions, such as a token interest score or a bot's
+strategy-specific equity requirement. The host includes bot identity, leg,
+status, configured margin, and current positions in the same report event.
+Your report is an arbitrary JSON value; the host does not interpret its fields.
+
+Reports are emitted only for bots attached to a strategy worker, when the
+module returns `Some(...)`. The event uses signal code `bot.runtime.report`;
+configure a workflow `worker_bot_event` trigger with that exact action code.
+The report is delivered to workflow runtime as an event and is not persisted
+in bot context.
+
+```rust
+ModuleOutput {
+    workflow_report: Some(serde_json::json!({
+        "interest_rate": state.interest_rate,
+        "required_equity": state.required_equity,
+    })),
+    ..Default::default()
+}
+```
 
 ---
 
@@ -551,6 +576,7 @@ Written to stdout as a single JSON line. The bridge reads this to execute tradin
 | `cancel_orders` | `Vec<String>` | `[]` | Marks of standing limit orders to cancel |
 | `alerts` | `Vec<ModuleAlert>` | `[]` | Alert notifications sent to the user (push/Telegram). See **Alerts** below |
 | `stop_bot` | `bool` | `false` | Set `true` to stop the bot after this tick |
+| `workflow_report` | `Option<serde_json::Value>` | `None` | Opaque values published to the owning strategy workflow as a `bot.runtime.report` event; not persisted to bot context |
 | `state` | `Option<serde_json::Value>` | `None` | Opaque state — **persisted to bot context** in DB (every ~80s) and restored on restart via `ModuleInput.state`. Also visible to the user in the UI |
 | `debug` | `String` | `""` | Debug message — logged at INFO level and saved in bot context (visible to user for tracing) |
 | `error` | `String` | `""` | Error message — logged at ERROR level by the bridge. `run_loop` populates this automatically for parse errors and handler panics |

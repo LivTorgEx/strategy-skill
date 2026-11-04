@@ -43,3 +43,6 @@ versioned strategy leg.
   `std::process::exit`.
 - Persist recoverable strategy state through the input and output `state`
   fields.
+- Return optional workflow-facing values through `ModuleOutput.workflow_report`;
+  the host publishes them as `bot.runtime.report` events and does not persist
+  them in bot context.
