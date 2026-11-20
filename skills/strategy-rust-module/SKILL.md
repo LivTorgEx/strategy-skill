@@ -207,7 +207,7 @@ The following object is one item in `create_strategy_version.legs`:
   "provider_code": "<provider code>",
   "program": {
     "schema": "quantflow_bot_v1",
-    "program": "module.start(\"eth_power\")"
+    "program": "module.start(\"eth_power\")\nfn main():\n    return null"
   },
   "modules": [
     {
@@ -218,7 +218,7 @@ The following object is one item in `create_strategy_version.legs`:
 }
 ```
 
-`module.start` must be a top-level statement. Aliases must be unique, lowercase, start with a letter, and contain only lowercase letters, digits, or underscores (maximum 64 characters). The `modules` aliases must exactly match all `module.start` declarations in that leg's program. `module_build_id` is the ID returned by `submit_module_wasm` or `list_module_builds`, not the repository ID or version string. The build must have status `Success` and belong to the strategy owner.
+Every leg program must define an unannotated `fn main()` entry point. `module.start` remains a top-level statement. Aliases must be unique, lowercase, start with a letter, and contain only lowercase letters, digits, or underscores (maximum 64 characters). The `modules` aliases must exactly match all `module.start` declarations in that leg's program. `module_build_id` is the ID returned by `submit_module_wasm` or `list_module_builds`, not the repository ID or version string. The build must have status `Success` and belong to the strategy owner.
 
 When updating an existing leg, omit `modules` to preserve its current bindings. If changing any `module.start` aliases, pass the complete new `program` and `modules` array together. Pass `modules: []` to clear all bindings and remove all `module.start` declarations. Use `get_strategy` to verify the leg's `program` and bindings, then call `release_strategy_version` when ready; released versions are immutable.
 

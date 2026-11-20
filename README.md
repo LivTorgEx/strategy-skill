@@ -4,17 +4,16 @@ A Claude Code plugin with guidance for classic bot groups and versioned
 strategy-version legs. Rust WASM modules can be built locally, uploaded as
 precompiled artifacts, and pinned to a leg through its QuantFlow program.
 
-## Two solutions
+## Strategy workflows
 
-This repository documents these strategy paths:
+This repository covers these strategy paths:
 
-1. Classic bot-group settings JSON: [solutions/strategy-settings/README.md](solutions/strategy-settings/README.md)
-2. Rust WASM modules pinned to versioned strategy legs: [solutions/strategy-rust-module/README.md](solutions/strategy-rust-module/README.md)
+1. Classic bot-group settings JSON: the [create-strategy skill](skills/create-strategy/SKILL.md)
+2. Rust WASM modules pinned to versioned strategy legs: the [Rust module guide](solutions/strategy-rust-module/README.md)
 
 Repository layout:
 
 - skills/ -> plugin skills used by Claude/Copilot
-- solutions/strategy-settings/ -> settings-based strategy workflow
 - solutions/strategy-rust-module/ -> Rust module scaffold and guide
 
 ## What it does
@@ -27,9 +26,10 @@ For a classic bot-group request, the skill will:
 4. Validate it against the server
 5. Create or update the bot group
 
-For a versioned strategy leg, use the strategy-version MCP tools. The leg's
-QuantFlow program declares each WASM module with `module.start("alias")`, and
-its `modules` array binds that alias to a successful `module_build_id`.
+For a versioned strategy leg, use the strategy-version MCP tools. Every leg's
+QuantFlow program requires an unannotated `fn main()` entry point. It declares
+each WASM module with the top-level `module.start("alias")` statement, and its
+`modules` array binds that alias to a successful `module_build_id`.
 
 ## Installation
 
@@ -110,6 +110,3 @@ Claude will build the JSON and deploy it.
 |-------|-------------|
 | `create-strategy` | Classic bot-group workflow: fetch context → build JSON → validate → deploy |
 | `strategy-rust-module` | Build/upload Rust WASM and bind a pinned build to a versioned strategy leg |
-| `strategy-indicators` | All 24 indicator types with correct fields and properties |
-| `strategy-conditions` | Filter, value, and action syntax reference |
-| `strategy-on-actions` | `on_analysis`, `on_indicators`, `on_actions` patterns and variables |

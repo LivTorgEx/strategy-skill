@@ -17,9 +17,9 @@ the complete workflow and ABI.
    the server does not receive Rust source or compile it.
 5. Select an owned strategy with `list_strategies`. In
    `create_strategy_version` or `update_strategy_version_leg`, put
-   `module.start("<alias>")` as a top-level
-   statement in the leg's QuantFlow program and bind the same alias to that
-   build ID in the leg's `modules` array.
+   `module.start("<alias>")` as a top-level statement in the leg's QuantFlow
+   program, include an unannotated `fn main()` entry point, and bind the same
+   alias to that build ID in the leg's `modules` array.
 6. Review the leg with `get_strategy`, then release the pre-release version
    when ready.
 
